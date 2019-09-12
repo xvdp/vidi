@@ -1,18 +1,12 @@
 """ capture utility
 """
 import platform
-import os.path as osp
 import subprocess as sp
-import numpy as np
-DEBUG = False
-
-
-
 
 class FFcap:
 
     def __init__(self, name='vid.avi', size=(640, 480), fps=30, increment=True, overwrite=True,
-                 codec="raw", pix_fmt="rgb24", debug=False):
+                 pix_fmt="rgb24", debug=False):
         """
         Args
             name        name of output video
@@ -20,8 +14,12 @@ class FFcap:
             fps         int, float [30]
             increment   bool [True], early closure does not corrupt file
             overwrite   bool [True],  overwrite file if found
-            codec       str [h264], "h264" or "raw"
-            pix_fmt     str [yuv420p], 'rgb', 'gray'
+            pix_fmt     str ['rgb24'], 'rgb24', 'gray' # not handled: yuv420p
+                # should pass any of `ffmpeg -pix_fmts`
+
+        Example:
+            with vidi.FFcap(name+ext, pix_fmt=pix_fmt, size=size, overwrite=True, debug=True) as F:
+        F.from_frames()
         """
 
 
@@ -34,35 +32,22 @@ class FFcap:
 
         self.increment = increment
         self.overwrite = overwrite
-        self.codec = codec
         self.pix_fmt = pix_fmt
 
-        #self.codec
         self.audio = False
 
         self.ffmpeg = 'ffmpeg' if platform.system() != 'Windows' else 'ffmpeg.exe'
         self._pipe = None
         self._framecount = 0
 
-    # def __enter__(self):
-    #     print('entering, fail()')
-    #     return self
+    def __enter__(self):
+        print('\n\t .__enter__()')
+        return self
 
-    # def __exit__(self, exc_type, exc_value, traceback):
-    #     self.close()
-
-    # def __del__(self):
-    #     self.close()
-
-    # def concat(self, files):
-
-    #     self.ffmpeg
-    #     cmd = [self.ffmpeg]
-    #     if self.overwrite:
-    #         cmd += ['-y']
-
-    #     cmd += ['-i']
-
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.debug:
+            print('\n\t .__exit__()\n')
+        self.close()
 
     def from_frames(self):
         """given image frames
@@ -78,10 +63,8 @@ class FFcap:
         cmd += ['-f', 'rawvideo']
         cmd += ['-vcodec', 'rawvideo']
         # else:
+        #     self.increment = False
         #     cmd += ['-vcodec', 'libx264']
-
-
-        #-vcodec libx264 -pix_fmt yuv420p
 
         # image size: if image size != frame size given, this will fail
         cmd += ['-s', '%dx%d'%self.size]
@@ -130,7 +113,6 @@ class FFcap:
             self._pipe.stdin.close()
             if self._pipe.stderr:
                 self._pipe.stderr.close()
-        print('FF.close()  <ff.py> ')
-        print('  recorded to file <%s>, Exists <%s>; nbframes <%d>'%(self.name,
-                                                                     str(osp.isfile(self.name)),
-                                                                     self._framecount), end="\r")
+        if self.debug:
+            print('FF.close()  <ff.py> ')
+            print('  recorded to file <%s>\n\tnumber of frames <%d>'%(self.name, self._framecount))

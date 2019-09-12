@@ -11,22 +11,23 @@ def _readme():
     with open('README.md') as fo_:
         return fo_.read()
 
-def _readversion():
-    with open(os.path.join('vidi', 'version.py')) as fo_:
-        return fo_.read().split(' = ')[1]
+def set_version(version):
+    with open('vidi/version.py', 'w') as _fi:
+        _fi.write("version='"+version+"'")
+    return version
 
 def setup_package():
     ''' setup '''
 
+
     metadata = dict(
         name='vidi',
-        version=_readversion(),
+        version=set_version(version='0.0.3'),
         description='modules to access video',
         url='http://github.com/xvdp/vidi',
         author='xvdp',
         author_email='xvdp@gmail.com',
         license='tbd',
-        dependency_links=['http://pytorch.org'],
         packages=find_packages(),
         long_description=_readme(),
         zip_safe=False)

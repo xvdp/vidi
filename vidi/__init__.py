@@ -1,3 +1,4 @@
+from .version import version as __version__
 from .vidi_main import VIDI
 from .io_main import IO
 from .ff_main import FF

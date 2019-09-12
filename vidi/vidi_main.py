@@ -25,9 +25,11 @@ class VIDI:
         # play all pngs
         ffplay -pattern_type glob -i 'metro*.png'
 
-        
+        # stitch all files called metro%08d.png to a mov
+        ffmpeg -r 29.97 -start_number 5468 -i metro%08d.png -vcodec libx264 -pix_fmt yuv420p /home/z/metropolis_color.mov
 
-
+        #stitch 200 frames
+        ffmpeg -r 29.97 -start_number 5468 -i metro%08d.png -vcodec libx264 -pix_fmt yuv420p -vframes 200 /home/z/metro_col.mov #only 200 frames
     """
 
     def __init__(self, fname=None, annotation_file=None, backend="ff"):
@@ -122,8 +124,6 @@ class VIDI:
         >>> V.stitch(src, name=dst, folder=input_folder, start_img=start_frame)
 
         >>> V.play()
-
-
 
         """
         if self.backend != 'ff':
