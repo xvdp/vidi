@@ -8,7 +8,7 @@ if sys.version_info[:2] < (3, 4):
     raise RuntimeError("Python version >= 3.4 required.")
 
 def _readme():
-    with open('README.rst') as fo_:
+    with open('README.md') as fo_:
         return fo_.read()
 
 def _readversion():

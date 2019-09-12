@@ -5,3 +5,4 @@ from .cv_main import CV
 from .annotator import Annotator
 
 from .ff_fun import ffplay, ffstitch
+from .ff_cap import FFcap

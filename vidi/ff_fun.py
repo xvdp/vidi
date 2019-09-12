@@ -131,14 +131,27 @@ def ffplay(src, folder=None, start=0, fps=None):
 
 def ffstitch(src, dst, folder=None, fps=29.97, start=0, size=None, num=None, audio=None): # dst, src, audio, fps, size, start_img, max_img)
     """
+    Args
+       required:
+        src
+        dst
+       optional:
+        folder
+        fps
+        start
+        size
+        num
+        audio
+
+
     Examples
-    vidi.ffstitch("*.png", "metro_color_tb4.mov", num=100)
-    vidi.ffstitch("metro%08d.png", "metro_color_tb4.mov", num=100, size=50)
-    vidi.ffstitch("metro%08d.png", "metro_color_tb4.mov", start=6000, num=100, size=(600,200))
+        vidi.ffstitch("*.png", "metro_color_tb4.mov", num=100)
+        vidi.ffstitch("metro%08d.png", "metro_color_tb4.mov", num=100, size=50)
+        vidi.ffstitch("metro%08d.png", "metro_color_tb4.mov", start=6000, num=100, size=(600,200))
 
-    vidi.ffstitch("metro%08d.png", "metro_color_tb4.mov", audio="/home/z/data/Music/Kronos/KNOX_-_SATELLITES_-_FULL_SCORE_AND_PARTS_1.aac", start=6000, num=2000)
+        vidi.ffstitch("metro%08d.png", "metro_color_tb4.mov", audio="/home/z/data/Music/Kronos/KNOX_-_SATELLITES_-_FULL_SCORE_AND_PARTS_1.aac", start=6000, num=2000)
 
-    #ffmpeg -r 29.97 -i "metro%08d.png" -start_number 6468 -vframes 200 -vcodec libx264 -pix_fmt yuv420p /home/z/metro_color.mov
+        #ffmpeg -r 29.97 -i "metro%08d.png" -start_number 6468 -vframes 200 -vcodec libx264 -pix_fmt yuv420p /home/z/metro_color.mov
     """
     _cwd = os.getcwd()
 
