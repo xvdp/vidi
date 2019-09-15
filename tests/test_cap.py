@@ -55,7 +55,7 @@ def record(F, img, crash, size, pix_fmt):
             F.add_frame((_img).astype(np.uint8))
 
 def test_with(name, ext, pix_fmt, img_path, crash=0):
-    name = "with_"+name+ext
+    name = name+ext
     img = get_img(img_path)
     clean_test(name)
     size = img.shape[:2]
@@ -84,17 +84,23 @@ def run_tests():
     _s = utils.Col.GB
     _n = utils.Col.AU
     _t = 0
+    fname = "res"
+    if not osp.isdir(fname):
+        os.mkdir(fname)
+    name = osp.join(fname, args.name)
     try:
-        cap = test_cap(args.name, args.ext, args.pix_fmt, args.img, args.crash)
+        cap = test_cap(name, args.ext, args.pix_fmt, args.img, args.crash)
         vidi.ffplay(cap, loop=1, autoexit=True, fullscreen=False)
         print("%sTest [%d], record, success\n---------------%s"%(_s,_t,_n))
+
     except:
         _fail.append(1)
         print("%sTest [%d], record, failure\n---------------%s"%(_f,_t,_n))
-    _t +=1
-    
+    _t += 1
+
     try:
-        wcap = test_with(args.name, args.ext, args.pix_fmt, args.img, args.crash)
+        name = name + "_with"
+        wcap = test_with(name, args.ext, args.pix_fmt, args.img, args.crash)
         vidi.ffplay(wcap, loop=1, autoexit=True, fullscreen=False)
         print("%sTest [%d], record, success\n---------------%s"%(_s,_t,_n))
     except:
@@ -102,13 +108,14 @@ def run_tests():
         print("%sTest [%d], record, failure\n---------------%s"%(_f,_t,_n))
     _t += 1
     try:
-        wcap = test_with(args.name, args.ext, "gray", args.img, args.crash)
+        name = name + "_gray"
+        wcap = test_with(name, args.ext, "gray", args.img, args.crash)
         vidi.ffplay(wcap, loop=1, autoexit=True, fullscreen=False)
         print("%sTest [%d], record, success\n---------------%s"%(_s,_t,_n))
     except:
         _fail.append(1)
         print("%sTest [%d], record, failure\n---------------%s"%(_f,_t,_n))
-    
+
     for i, f in enumerate(_fail):
         print("%sTest [%d], record, failure\n---------------%s"%(_f,f,_n))
     if not _fail:

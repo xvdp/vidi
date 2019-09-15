@@ -112,7 +112,7 @@ class FF():
 
     def play(self, fname=None):
         """ff play video
-        
+
         ffplay -i metro.mov
         ffplay -start_number 5486 -i metro%08d.png
         """
@@ -232,7 +232,7 @@ class FF():
         _fcmd = [self.ffmpeg, '-i', self.file, '-ss', _time, '-start_number',
                  str(start), '-vframes', str(num_frames)]
 
-        if scale < 1:
+        if scale != 1:
             _scale = ['-s', '%dx%d'%(int(self.stats['width'] * scale), int(self.stats['height'] * scale))]
             _fcmd = _fcmd + _scale
             out_name = out_name + '_' + str(scale)
