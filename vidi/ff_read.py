@@ -11,25 +11,27 @@ from .ff_fun import ffprobe
 
 class FFread:
 
-    def __init__(self, src, batch_size=1, out_type="numpy", start=None, frames=None, pix_fmt="rgb24",
-                 dtype="float32", device="cpu", grad=False, debug=False):
+    def __init__(self, src, batch_size=1, out_type="numpy", start=None, frames=None,
+                 pix_fmt="rgb24", dtype="float32", device="cpu", grad=False, debug=False):
         """
         Args
-            src      (str) valid video file
-            start    (number [None])
+            src     (str) valid video file
+            start   (number [None])
                 if float: interpret as time
                 if int: interpret as frame
-            frames (number, [None])
+            frames  (number, [None])
                 if float: interpret as time
                 if int: interpret as frame
-            pix_fmt
-            debug
+            pix_fmt (str [rgb24])
+            debug   (bool [False])
             dtype   (str [float32]) | float64 | float16 | uint8
 
         Examples:
-            with vidi.FFcap(name+ext, pix_fmt=pix_fmt, size=size, overwrite=True, debug=True) as F:
-        F.open_pipe()
-        F.read(batch)
+
+            with vidi.FFread(src, batch_size=20, out_type="torch", start=None, frames=1000,
+                             pix_fmt="rgb24, debug=True, dtype="float32", device="cpu", grad=False) as F:
+                F.get_batch_loop()
+                # F.get_batch() # slower than looping the reads Test multiprocessing
 
 
         F.stats: {"index", "codec_name", "codec_type", "width", "height", "pix_fmt",
@@ -99,11 +101,10 @@ class FFread:
         self._pipe = None
 
     def get_batch(self):
+        """ Fills batch data by reading from ffmpeg buffer, one batch at a time
+        """
         self.data *= 0
-        # print(Col.GB, self.data.shape, self.framecount, Col.AU)
-
-        for i in range(self.batch_size):
-            self._update_data(i, self._pipe.stdout.read(self._bufsize))
+        self._update_data(self._pipe.stdout.read(self._bufsize * self.batch_size))
 
         self.framecount += self.batch_size
 
@@ -113,7 +114,49 @@ class FFread:
         if self.framecount >= self.frames:
             return self.close()
 
-    def _update_data(self, idx, data):
+    def _update_data(self, data):
+
+        _framecount = self.framecount+self.batch_size
+
+        _data = np.frombuffer(data, dtype=np.uint8)
+        if self.timer is not None:
+            self.timer.subtic("update from buffer [%d]"%_framecount)
+
+        _data = _data.reshape(self.batch_size, self._h, self._w, self._c)
+        if self.timer is not None:
+            self.timer.subtic("reshaped to (%d, %d, %d, %d) [%d]"%(self.batch_size, self._h, self._w, self._c, _framecount))
+
+        if "float" in self.dtype:
+            _data = _data/self._255
+            if self.timer is not None:
+                self.timer.subtic("to dtype %s, [%d]"%(self.dtype, _framecount))
+
+        if self.out_type == "numpy":
+            self.data[:] = _data
+            if self.timer is not None:
+                self.timer.subtic("fill np array [%d]"%(_framecount))
+        else:
+            self.data[:] = torch.from_numpy((_data)).permute(0, 3, 1, 2)
+            if self.timer is not None:
+                self.timer.subtic("fill tensor and permuted [%d]"%(_framecount))
+
+    def get_batch_loop(self):
+        """ Fills batch data by reading from ffmpeg buffer, one image at a time
+        """
+        self.data *= 0
+
+        for i in range(self.batch_size):
+            self._update_data_loop(i, self._pipe.stdout.read(self._bufsize))
+
+        self.framecount += self.batch_size
+
+        if self.timer is not None:
+            self.timer.tic("batch retrieved, framecount [%d]"%self.framecount)
+
+        if self.framecount >= self.frames:
+            return self.close()
+
+    def _update_data_loop(self, idx, data):
         _data = np.frombuffer(data, dtype=np.uint8)
         if self.timer is not None:
             self.timer.subtic("update from buffer [%d]"%self.framecount)
@@ -135,44 +178,6 @@ class FFread:
             self.data[idx] = torch.from_numpy((_data)).permute(2, 0, 1)
             if self.timer is not None:
                 self.timer.subtic("fill tensor and permuted at index %d, [%d]"%(idx, self.framecount))
-
-    # def get_batch(self):
-    #     self.data *= 0
-    #     # print(Col.GB, self.data.shape, self.framecount, Col.AU)
-
-    #     for i in range(self.batch_size):
-    #         self._update_data(i, self._pipe.stdout.read(self._bufsize))
-
-    #     self.framecount += self.batch_size
-
-    #     if self.timer is not None:
-    #         self.timer.tic("batch retrieved, framecount [%d]"%self.framecount)
-
-    #     if self.framecount >= self.frames:
-    #         return self.close()
-
-    # def _update_data(self, idx, data):
-    #     _data = np.frombuffer(data, dtype=np.uint8)
-    #     if self.timer is not None:
-    #         self.timer.subtic("update from buffer [%d]"%self.framecount)
-
-    #     _data = _data.reshape(self._h, self._w, self._c)
-    #     if self.timer is not None:
-    #         self.timer.subtic("reshaped to (%d, %d, %d) [%d]"%(self._h, self._w, self._c, self.framecount))
-
-    #     if "float" in self.dtype:
-    #         _data = _data/self._255
-    #         if self.timer is not None:
-    #             self.timer.subtic("to dtype %s, [%d]"%(self.dtype, self.framecount))
-
-    #     if self.out_type == "numpy":
-    #         self.data[idx] = _data
-    #         if self.timer is not None:
-    #             self.timer.subtic("fill np array at index %d, [%d]"%(idx, self.framecount))
-    #     else:
-    #         self.data[idx] = torch.from_numpy((_data)).permute(2, 0, 1)
-    #         if self.timer is not None:
-    #             self.timer.subtic("fill tensor and permuted at index %d, [%d]"%(idx, self.framecount))
 
 
     def _init_data(self):
