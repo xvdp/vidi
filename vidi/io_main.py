@@ -15,8 +15,7 @@ class IO:
         self.file_resolve(fname)
         self.template = template
 
-    def get_images(self, folder='.', name=None, fmt=('.jpg', '.jpeg', '.png'), max_imgs=None,
-                   as_str=False):
+    def get_images(self, folder='.', name=None, fmt=('.jpg', '.jpeg', '.png'), max_imgs=None):
         """ Returns list or concat str of files
 
             folder   folder to find images
@@ -46,7 +45,7 @@ class IO:
             
             name_root = osp.basename(name.split("%")[0])
             fmt = osp.splitext(name)[1]
-            print(name_root, fmt, name)
+            #print(name_root, fmt, name)
             first_file = sorted([f for f in os.listdir(folder) if osp.splitext(f)[1].lower() in fmt and name_root in f])[0]
 
             start_frame = int(osp.splitext(first_file.split(name_root)[1])[0])

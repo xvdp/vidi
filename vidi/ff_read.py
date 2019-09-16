@@ -68,6 +68,9 @@ class FFread:
         self._pipe = None
         self._ffmpeg = 'ffmpeg' if platform.system() != 'Windows' else 'ffmpeg.exe'
         self.framecount = 0
+        self._div = 1
+        if self.dtype in "float":
+            self._div = 255.0
         self._255 = np.array(255, dtype=self.dtype)
 
     def __enter__(self):
@@ -126,17 +129,17 @@ class FFread:
         if self.timer is not None:
             self.timer.subtic("reshaped to (%d, %d, %d, %d) [%d]"%(self.batch_size, self._h, self._w, self._c, _framecount))
 
-        if "float" in self.dtype:
-            _data = _data/self._255
-            if self.timer is not None:
-                self.timer.subtic("to dtype %s, [%d]"%(self.dtype, _framecount))
 
         if self.out_type == "numpy":
+            if "float" in self.dtype:
+                _data = _data/self._255
+            if self.timer is not None:
+                self.timer.subtic("to dtype %s, [%d]"%(self.dtype, _framecount))
             self.data[:] = _data
             if self.timer is not None:
                 self.timer.subtic("fill np array [%d]"%(_framecount))
         else:
-            self.data[:] = torch.from_numpy((_data)).permute(0, 3, 1, 2)
+            self.data[:] = ((torch.from_numpy(_data).to(device=self.device).permute(0, 3, 1, 2)).to(dtype=torch.__dict__[self.dtype])/self._div).contiguous()
             if self.timer is not None:
                 self.timer.subtic("fill tensor and permuted [%d]"%(_framecount))
 
@@ -157,27 +160,42 @@ class FFread:
             return self.close()
 
     def _update_data_loop(self, idx, data):
+
         _data = np.frombuffer(data, dtype=np.uint8)
         if self.timer is not None:
-            self.timer.subtic("update from buffer [%d]"%self.framecount)
+            self.timer.subtic("[%d]update from buffer "%(self.framecount+idx))
 
         _data = _data.reshape(self._h, self._w, self._c)
         if self.timer is not None:
-            self.timer.subtic("reshaped to (%d, %d, %d) [%d]"%(self._h, self._w, self._c, self.framecount))
+            self.timer.subtic("[%d] reshaped to (%d, %d, %d) "%((self.framecount+idx), self._h, self._w, self._c))
 
-        if "float" in self.dtype:
-            _data = _data/self._255
-            if self.timer is not None:
-                self.timer.subtic("to dtype %s, [%d]"%(self.dtype, self.framecount))
 
         if self.out_type == "numpy":
+            if "float" in self.dtype:
+                _data = _data/self._255
+                if self.timer is not None:
+                    self.timer.subtic("to dtype %s, [%d]"%(self.dtype, self.framecount))
+
             self.data[idx] = _data
             if self.timer is not None:
                 self.timer.subtic("fill np array at index %d, [%d]"%(idx, self.framecount))
         else:
-            self.data[idx] = torch.from_numpy((_data)).permute(2, 0, 1)
+            self.data[idx] = ((torch.from_numpy(_data).to(device=self.device).permute(2, 0, 1)).to(dtype=torch.__dict__[self.dtype])/self._div).contiguous()
+
+            #self.data[idx] = torch.from_numpy((_data)).permute(2, 0, 1)
             if self.timer is not None:
-                self.timer.subtic("fill tensor and permuted at index %d, [%d]"%(idx, self.framecount))
+                self.timer.subtic("[%d] fill tensor and permuted at index"%(idx+self.framecount))
+
+
+        """
+        data = np.frombuffer(self._pipe.stdout.read(self._bufsize), dtype=np.uint8).reshape(1, self._c, self._h, self._w)
+        if self.timer is not None:
+            self.timer.subtic("subtic, from buffer [%d]"%self.framecount)
+        data = (torch.from_numpy(data).to(device=self.device).permute(0, 3, 1, 2).to(dtype=self.dtype)/self._div).contiguous()
+        if self.timer is not None:
+            self.timer.tic("to torch [%d]"%self.framecount)
+        self.framecount += 1
+        """
 
 
     def _init_data(self):
@@ -186,56 +204,7 @@ class FFread:
         else: # out_type: torch
             return torch.zeros([self.batch_size, self._c, self._h, self._w],
                                dtype=torch.__dict__[self.dtype], device=self.device, requires_grad=self.grad)
-    """
-    print(Col.YB, ' '.join(fcmd), Col.AU)
-    #TODO
-    _TODO_calculate_buffer_size = _width*_height*_c*8
-
-    try:
-        T = Timer()
-        pipe = sp.Popen(fcmd, stdout=sp.PIPE, bufsize=_TODO_calculate_buffer_size)
-        T.tic("make pipe")
-
-        for i in range(num_frames):
-        #while True:
-            #try:
-            img_raw = pipe.stdout.read(_height*_width*_c)
-
-            #T.tic("read pipe [%d]"%i)
-            #print(Col.YB, "type", type(img_raw), Col.AU)
-
-
-            img = np.frombuffer(img_raw, dtype=np.uint8).reshape(_height, _width, _c)
-            #img = Image.frombuffer('RGB', (_width, _height), img_raw, "raw", 'RGB', 0, 1)
-
-            # no scale: 68us
-            # scale with PIL 640x480 * 2: 1.3 ms
-            # scale with ffmpeg 640x480 * default : 6.8ms 
-            # scale with ffmpeg 640x480 * 2 bilinear : 3.8ms 
-            if scale != 1:
-                img = Image.fromarray(img, 'RGB')
-                img.resize(size)
-            
-
-            #print(Col.BB, "shape", img.shape, Col.AU)
-            T.tic("to numpy [%d]"%i)
-
-        cont = False
-
-        ## tet stats
-        pipe.stdout.flush()
-    except:
-        print(Col.RB, "CANT OPEN PIPE", Col.AU)
-
-    # if pipe is not None:
-    #     pipe.stdout.close()
-
-    T.toc('flush')
-
-    plt.imshow(img)
-    plt.show()
-
-    """
+ 
     def _build_cmd(self):
 
         self._cmd = [self._ffmpeg]
