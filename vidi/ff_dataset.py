@@ -1,4 +1,4 @@
-"""
+""" (c) xvdp 2019
 pipe to numpy
 ((torch.from_numpy(myomy)).to(device='cuda').permute(2,0,1).to(dtype=torch.float)/255.).contiguous()
 """
@@ -19,15 +19,48 @@ Detector: when does the frame shift, when does the shot change.
 
 """
 _DEBUG = True
+"""
+ffmpeg transforms, any transform valid in ffmpeg can be passed to this as a list in the ffmpeg syntax as per https://ffmpeg.org/ffmpeg-filters.html
+ffmpeg transforms are executed globally or temporally as per ffmpeg syntax
+Examples of temporal transforms also possible but not listed here
 
-# class FTransform(object):
-#     def __init__(self, name, mode, **params):
-#         self.name = name
-#         self.mode = mode
-#         for p in **params:
-#             self
-
-#     def __call__(self):
+Examples of per frame transforms:
+    ftransform = ["edgedetect=low=0.1:high=0.05"]
+        = ["edgedetect=low=0.1:high=0.05", "negate"]
+        = ["edgedetect=mode=colormix:high=0.7", "negate"]
+        = ["edgedetect=mode=canny:high=0"]
+    # histogram equalization
+        = ["histeq=strength=0.5"]
+        = ["histeq=strength=0.2:intensity=.9"]
+    # lens distorts
+        = ["lenscorrection=cx=0.5:cy=0.5:k1=-0.7:k2=-0.7"]
+        = ['lenscorrection=cx=0.5:cy=0.5:k1=0.7:k2=0.7']
+    # color balance
+        = ["colorbalance=rs=.3"] # add red shift to shadows
+        = ["colorbalance=gh=.5"] # add green shift to highlights
+        = ["colorbalance=gm=.5:bm=.5"] # blue and red to midtobnes
+    # channel mixer
+        = ["colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131"] # simulate sepia
+    # color levels
+        = ["colorlevels=rimin=0.039:gimin=0.039:bimin=0.039:rimax=0.96:gimax=0.96:bimax=0.96"] # increase contrast
+        = ["colorlevels=romin=0.5:gomin=0.5:bomin=0.5"] # increase brightness
+    # convolution
+        = ["convolution='1 1 1 1 -8 1 1 1 1:1 1 1 1 -8 1 1 1 1:1 1 1 1 -8 1 1 1 1:1 1 1 1 -8 1 1 1 1:5:5:5:1:0:128:128:0'"] # laplacian edge detector
+    # curves
+        = ["curves=r='0/0.11 .42/.51 1/0.95':g='0/0 0.50/0.48 1/1':b='0/0.22 .49/.44 1/0.8'"] # vintage effect
+    # blur
+        = ["gblur=sigma=6:sigmaV=0.1"]
+    # gradient function
+        = ['gradfun=radius=8'] # fix banding
+    # white balance
+        = ["greyedge=difford=1:minknorm=5:sigma=2"]
+    # flip
+        = ["greyedge=difford=1:minknorm=5:sigma=2"]
+    # rotate
+        = ["rotate=PI/6"]
+    # zoom  #uses auxiliary function def zoom()
+        = [zoom(src, z=2, center=(0,1))]
+"""
 
 
 class AVDataset(Dataset):
@@ -45,18 +78,20 @@ class AVDataset(Dataset):
             frames  (int [None])   number of frames to be read
                     (float [None]) time to be read
             step    (int [1]) step search between frames
+
             ftransform (list [None])   ffmpeg transforms  any filter in ffmpeg
-            ptransform (object subclass [None])   PIL transforms
-            ntransform (object subclass [None])   numpy transforms
-            ttransform (object subclass [None])   torch transforms
+            ptransform (object subclass [None])   PIL transforms as in torchvision.transforms
+            ntransform (object subclass [None])   numpy transforms built w same syntax as torchvision transforms
+            ttransform (object subclass [None])   torch transforms built w same syntax as torchvision transforms
             dtype (torch type ['float32])
             device  (str ['cpu']) cpu|cuda
             grad    (bool[False]) requires_grad
             debug   (bool[False])
 
         Examples:
-            ftransform = ftransform=["edgedetect=high=0", "negate"]
-            ftransform = ftransform=["edgedetect=mode=colormix:high=0"]
+            ftransform = ftransform=["edgedetect=high=0", "negate"]     # getated edges
+            ftransform = ftransform=["edgedetect=mode=colormix:high=0"] # cartoon colorization
+            ftransform = ftransform=["edgedetect=mode=canny:low=0.3:high=0.5"] # canny
         """
         self.src = src
         self.stats = ffprobe(src)
@@ -117,7 +152,7 @@ class AVDataset(Dataset):
             dsubtic(self.timer, "read ffmpeg frame to buffer [%d]"%self.framecount)
         except:
             print("%sFailed to read buffer from command:\n\t%s%s%s"%(Col.YB, self._cmd, Col.RB, Col.AU))
-
+    
         # PIL transforms
         if self.ptransform is not None:
             data = Image.frombuffer('RGB', (self._h, self._w), data, "raw", 'RGB', 0, 1)
@@ -227,6 +262,20 @@ class AVDataset(Dataset):
             return frame_to_time(value, fps=self.stats["avg_frame_rate"])
         assert False, "%sexpected int (frames) or float (time), got %s%s"%(Col.RB, str(type(value)), Col.AU)
 
+
+def zoom(src, z=1, center=(0.5, 0.5)):
+    """ concatenate crop and scale for zoom
+    Args:
+        src (str video file)
+        z   (float zoom factor)
+        center (tuple [0.5,0.5]) in range 0 -1
+    """
+    stats = ffprobe(src)
+    size = np.array([stats['width'], stats['height']])
+    center = np.clip(np.array(center), 0, 1)
+    zsize = (size/z).astype(int)
+    zoffset = ((size - zsize)* center).astype(int)
+    return "crop=w=%d:h=%d:x=%d:y=%d,scale=w=%d:h=%d"%(zsize[0], zsize[1], zoffset[0], zoffset[1], size[0], size[1])
 
 
 # class FFdset(Dataset):

@@ -248,11 +248,3 @@ class FFread:
             print("%sskipping last %d frames from batch%s"%(Col.YB, (self.frames - _frames), Col.AU))
             self.frames = _frames
 
-
-    # def _from_numpy_contiguous(self, ndarray):
-    #     tensor = torch.from_numpy(ndarray.transpose(2, 1, 0))
-    #     out = torch.zeros(tensor.shape)
-    #     out[:] = tensor
-    #     del tensor
-    #     return out
-        
