@@ -2,6 +2,7 @@
 """
 import platform
 import subprocess as sp
+from .utils import Col
 
 class FFcap:
 
@@ -57,7 +58,7 @@ class FFcap:
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self.debug:
-            print('\n\t .__exit__()\n')
+            print('%s\n\t .__exit__()\n%s'%(Col.YB, Col.AU))
         self.close()
 
 
@@ -67,12 +68,17 @@ class FFcap:
                 self.init_frames()
         if self._pipe is not None:
             self.close()
+        if self.debug:
+            print('%sOpening PIPE%s'%(Col.GB, Col.AU))
         self._pipe = sp.Popen(self._cmd, stdin=sp.PIPE, stderr=sp.PIPE)
 
     def close(self):
         if self._pipe is not None:
+            if self.debug:
+                print('%sClosing PIPE%s'%(Col.YB, Col.AU))
             self._pipe.stdin.close()
         self._pipe = None
+        print('%sPIPE Closed%s'%(Col.YB, Col.AU))
 
     def init_frames(self):
         """given image frames

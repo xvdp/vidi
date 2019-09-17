@@ -195,9 +195,12 @@ def ffstitch(src, dst, folder=None, fps=29.97, start=0, size=None, num=None, aud
 
 
 def _ffprobe_parse_stat(stat):
+    """if stat.isnumeric(): only handles ints"""
     stat = stat.replace('\n', '')
-    if stat.isnumeric():
+    try:
         stat = eval(stat)
+    except:
+        pass
     return stat
 
 def _ffprobe_sort_entries(requested, dictionary, verbose=False):

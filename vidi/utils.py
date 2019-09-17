@@ -61,11 +61,11 @@ class Timer:
             indent = "\t"
             col = Col.BB if i != _i else Col.RB
             _name = _t
-            if "subtic:" in _t:
+            if "subtic" in _t:
                 _name = _name.split("subtic")[1]
                 col = Col.GB
                 indent = ""
-            
+
             _name = _name + (_len - len(_name))*" "+ indent
             print(" %s%s\t%.3f ms%s"%(_name, col, self.times[_t]*1000, Col.AU))
 
@@ -78,6 +78,23 @@ class Timer:
         _name = "Total\t"+" "*max(0, _len-len("Total"))
         print("%s%s\t%s%s"%(Col.YB, _name, _total, Col.AU))
 
+def dprint(*msg, debug=False, **kwmsg):
+    """debug print wrapper"""
+    if debug:
+        print(*msg, **kwmsg)
+
+def dtic(timer, msg):
+    """conditional wrapper to Timer().tic"""
+    if timer is not None:
+        timer.tic(msg)
+def dsubtic(timer, msg):
+    """conditional wrapper to Timer().subtic"""
+    if timer is not None:
+        timer.subtic(msg)
+def dtoc(timer, msg):
+    """conditional wrapper to Timer().toc"""
+    if timer is not None:
+        timer.toc(msg)
 
 def frame_to_time(frame, fps):
     """convert frame number to time"""

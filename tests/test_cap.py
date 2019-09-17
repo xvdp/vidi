@@ -41,8 +41,8 @@ def record(F, img, crash, size, pix_fmt):
     one = np.ones([size[0], size[1], c], dtype=np.uint8)*255
 
     for i in range(4):
-        if crash and i == 3:
-            assert False, "break to ensure close works"
+        if crash and i == 2:
+            return
         for j in range(10):
             F.add_frame(img)
         for j in range(10):
