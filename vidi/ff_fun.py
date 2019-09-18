@@ -276,6 +276,10 @@ def _ff_format_input_list(src, start=0, folder=None):
         if start is not None:
             print("%signoring 'start' argument, only valid with templated arguments%s"%(Col.YB, Col.AU))
         fcmd += ["-pattern_type", "glob"]
+    elif start and start is not None:
+        if isinstance(start, int): # interpret as frame, return time
+            start = frame_to_time(start, fps=29.97) #self.stats["avg_frame_rate"]
+        fcmd += ["-ss", strftime(start-1)]
 
     return fcmd
 

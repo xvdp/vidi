@@ -1,6 +1,5 @@
 """ (c) xvdp 2019
-pipe to numpy
-((torch.from_numpy(myomy)).to(device='cuda').permute(2,0,1).to(dtype=torch.float)/255.).contiguous()
+AVDataset
 """
 import platform
 import subprocess as sp
@@ -276,6 +275,12 @@ def zoom(src, z=1, center=(0.5, 0.5)):
     zsize = (size/z).astype(int)
     zoffset = ((size - zsize)* center).astype(int)
     return "crop=w=%d:h=%d:x=%d:y=%d,scale=w=%d:h=%d"%(zsize[0], zsize[1], zoffset[0], zoffset[1], size[0], size[1])
+
+"""
+
+fastest numpy to torch
+((torch.from_numpy(myomy)).to(device='cuda').permute(2,0,1).to(dtype=torch.float)/255.).contiguous()
+"""
 
 
 # class FFdset(Dataset):

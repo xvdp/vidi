@@ -19,16 +19,19 @@ def set_version(version):
 def setup_package():
     ''' setup '''
 
+    tests_require = ['nose2']
+    install_requires = ['numpy', "torch"]
 
     metadata = dict(
         name='vidi',
-        version=set_version(version='0.0.7'),
+        version=set_version(version='0.0.8'),
         description='modules to access video',
         url='http://github.com/xvdp/vidi',
         author='xvdp',
         author_email='xvdp@gmail.com',
         license='tbd',
         packages=find_packages(),
+        tests_require=tests_require,
         long_description=_readme(),
         zip_safe=False)
 
