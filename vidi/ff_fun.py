@@ -67,7 +67,8 @@ def ffprobe(src, entries=None, verbose=False):
 
     if verbose:
         T.toc()
-
+    _pipe.close()
+    #_pipe.terminate()
     return stats
 
 def ffplay(src, folder=None, start=0, fps=None, loop=0, autoexit=True, fullscreen=False):
@@ -119,7 +120,6 @@ def ffplay(src, folder=None, start=0, fps=None, loop=0, autoexit=True, fullscree
 
     if folder is not None:
         os.chdir(_cwd)
-
 
 def ffstitch(src, dst, folder=None, fps=29.97, start=0, size=None, num=None, audio=None): # dst, src, audio, fps, size, start_img, max_img)
     """ stitches folder of files to video

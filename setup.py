@@ -20,11 +20,13 @@ def setup_package():
     ''' setup '''
 
     tests_require = ['nose2']
-    install_requires = ['numpy', "torch"]
+    install_requires = ['numpy']
+    #,torch >= 1.0 from conda
+    # ffmpeg from conda forge
 
     metadata = dict(
         name='vidi',
-        version=set_version(version='0.0.8'),
+        version=set_version(version='0.0.9'),
         description='modules to access video',
         url='http://github.com/xvdp/vidi',
         author='xvdp',
@@ -32,6 +34,7 @@ def setup_package():
         license='tbd',
         packages=find_packages(),
         tests_require=tests_require,
+        install_requires=install_requires,
         long_description=_readme(),
         zip_safe=False)
 

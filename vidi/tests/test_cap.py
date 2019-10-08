@@ -44,13 +44,13 @@ def record(F, img, crash, size, pix_fmt):
 IMG = get_img("test_data/bundaberg_bully.jpg")
 SIZE = IMG.shape[:2]
 NAME = "test_cap.avi"
-CRASH = True
+CRASH = False
 
 class TestCap(TestCase):
 
     def test_Capture_RGB(self):
 
-        print(Col.GB+"test_capture() RGB"+Col.YB)
+        print(Col.GB+"\ntest_capture() RGB"+Col.YB)
         print(Col.GB, "Test folder", os.getcwd(), Col.AU)
 
         pix_fmt = "rgb24"

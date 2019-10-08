@@ -2,7 +2,7 @@
 """
 import platform
 import subprocess as sp
-from .utils import Col
+from .utils import Col, dprint
 
 class FFcap:
 
@@ -51,14 +51,13 @@ class FFcap:
 
 
     def __enter__(self):
-        print('\n\t .__enter__()')
+        dprint('%sFFcap.__enter__()\n%s'%(Col.YB, Col.AU), debug=self.debug)
         self.open()
 
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if self.debug:
-            print('%s\n\t .__exit__()\n%s'%(Col.YB, Col.AU))
+        dprint('%sFFcap.__exit__()\n%s'%(Col.YB, Col.AU), debug=self.debug)
         self.close()
 
 
@@ -68,17 +67,20 @@ class FFcap:
                 self.init_frames()
         if self._pipe is not None:
             self.close()
-        if self.debug:
-            print('%sOpening PIPE%s'%(Col.GB, Col.AU))
+        dprint('%sOpening PIPE%s'%(Col.GB, Col.AU), debug=self.debug)
         self._pipe = sp.Popen(self._cmd, stdin=sp.PIPE, stderr=sp.PIPE)
 
     def close(self):
         if self._pipe is not None:
-            if self.debug:
-                print('%sClosing PIPE%s'%(Col.YB, Col.AU))
+            dprint('%sClosing PIPE%s'%(Col.YB, Col.AU), debug=self.debug)
+            
+            self._pipe.stdin.flush()
             self._pipe.stdin.close()
+            self._pipe.stderr.close()
+            self._pipe.terminate()
+            # self._pipe.kill()
         self._pipe = None
-        print('%sPIPE Closed%s'%(Col.YB, Col.AU))
+        dprint('%sPIPE Closed%s'%(Col.YB, Col.AU), debug=self.debug)
 
     def init_frames(self):
         """given image frames
@@ -119,14 +121,12 @@ class FFcap:
             self._cmd += ["-movflags", "frag_keyframe"]
 
         self._cmd += [self.name]
-        if self.debug:
-            print('  DEBUG: <ff.py>: ff.FF.init_frames() cmd: \n\t%s'%" ".join(self._cmd))
+        dprint('%s%s%s'%(Col.GB, (" ".join(self._cmd)), Col.AU), debug=self.debug)
 
 
     def add_frame(self, frame):
-        #debugprint
         if self.debug:
-            print('  : <ff.py>: ff.FF.add_frame(frame): %d, %s'%(self._framecount, str(frame.shape)), end="\r")
+            print('%sadd_frame() %d %s%s'%(Col.BB, self._framecount, str(frame.shape), Col.AU), end="\r")
         assert frame.shape == self._shape, "attempting to input incorrect file size, <%s> instead of <%s>"%(str(frame.shape), str(self._shape))
         self._pipe.stdin.write(frame.tobytes())
         self._framecount += 1

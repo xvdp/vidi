@@ -4,7 +4,21 @@
 Examples:
 * accessing through vidi 
 
+## Classes
+* AVDataset(Dataset)
+    `AV.__getitem__()`
+    file: ff_dataset.py
+    examples: vidi/jupyter/AVDataset.ipynb
+* FFread()
+    ff_read.py
+* FFcap()
+    ff_cap.py
 
+## Functions
+* `ffprobe(src)`
+* `ff_play(src, folder=None, start=0, fps=None, loop=0, autoexit=True, fullscreen=False)`
+* `ffstitch(src, dst, folder=None, fps=29.97, start=0, size=None, num=None, audio=None)`
+    ff_fun.py
 ## Play files
 ```python
 import vidi
