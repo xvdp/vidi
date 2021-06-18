@@ -15,7 +15,7 @@ class IO:
         self.file_resolve(fname)
         self.template = template
 
-    def get_images(self, folder='.', name=None, fmt=('.jpg', '.jpeg', '.png'), max_imgs=None):
+    def get_images(self, folder='.', name=None, fmt=('.jpg', '.jpeg', '.png'), max_imgs=None, as_str=False):
         """ Returns list or concat str of files
 
             folder   folder to find images

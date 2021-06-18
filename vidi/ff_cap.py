@@ -15,13 +15,17 @@ class FFcap:
             fps         int, float [30]
             increment   bool [True], early closure does not corrupt file
             overwrite   bool [True],  overwrite file if found
-            pix_fmt     str ['rgb24'], 'rgb24', 'gray' # not handled: yuv420p
+
+            pix_fmt     str ['rgb24'], 'rgb24', 'gray' 
+                # should pass any of `ffmpeg -pix_fmts`  but #'yuv420p' does not work
+
+
             src_type      str ['stdin'] 'stdin' | (not implemented): 'screen'| webcam | ximea
-                # should pass any of `ffmpeg -pix_fmts`
 
         Example:
-            with vidi.FFcap(name+ext, pix_fmt='rgb24, fps=29.97, size=(640,480), overwrite=True, debug=True, src_type='stdin') as F:
-                F.init_frames()
+
+            with vidi.FFcap("myvid.mp4", pix_fmt='rgb24, fps=29.97, size=(640,480), overwrite=True, debug=True, src_type='stdin') as F:
+                F.add_frame(ndarray)
         """
 
 
@@ -125,6 +129,8 @@ class FFcap:
 
 
     def add_frame(self, frame):
+        """ pix_fmt rgb24 requires uint8 RGB
+        """
         if self.debug:
             print('%sadd_frame() %d %s%s'%(Col.BB, self._framecount, str(frame.shape), Col.AU), end="\r")
         assert frame.shape == self._shape, "attempting to input incorrect file size, <%s> instead of <%s>"%(str(frame.shape), str(self._shape))

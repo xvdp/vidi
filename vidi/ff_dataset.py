@@ -1,4 +1,4 @@
-""" (c) xvdp 2019
+""" (c) xvdp
 AVDataset
 """
 import platform
@@ -61,7 +61,7 @@ Examples of per frame transforms:
         = [zoom(src, z=2, center=(0,1))]
 """
 
-
+# pylint: disable=no-member
 class AVDataset(Dataset):
     def __init__(self, src, start=None, frames=None, step=1,
                  ftransform=None,
@@ -319,7 +319,5 @@ def zoom(src, z=1, center=(0.5, 0.5)):
     return "crop=w=%d:h=%d:x=%d:y=%d,scale=w=%d:h=%d"%(zsize[0], zsize[1], zoffset[0], zoffset[1], size[0], size[1])
 
 """
-
-fastest numpy to torch
 ((torch.from_numpy(myomy)).to(device='cuda').permute(2,0,1).to(dtype=torch.float)/255.).contiguous()
 """

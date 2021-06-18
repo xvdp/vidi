@@ -58,3 +58,51 @@ class Annotator:
             self.A = {**json.load(_fi)}
             if self.debug:
                 print(self.A)
+
+
+"""
+
+# TODO REVISE VALIDITY
+--------------------
+```python
+    import os
+    import vidi
+
+    f=os.path.expanduser('~/work/Data/Foot/fromwild/videos/MUCBCN.mp4')
+    
+    v = vidi.V(f) 
+
+    v.cv.get_stats()
+    v.ff.get_stats()
+
+    v.ff.play()
+    v.cv.play()
+
+    #Example 2, load a different file
+    g=os.path.expanduser('~/work/Data/Foot/fromwild/videos/Ronaldo goal in 2002 World Cup Final - 1080p HD.mp4')
+    v.setfile(g)
+
+    #Example 3, load also annotation
+    a ='/home/z/work/pneumonia/extra.json'
+    v = vidi.V(f, a)
+    v.cv.play()
+
+```
+* annotation
+```python
+    #creates annotation template
+    from vidi import Annotator
+    A = Annotator()
+    A.marker('L4Root')
+    ...
+    A.line('Spine')
+    A.write('/home/z/work/pneumonia/extra.json')
+    print(A)
+
+    #loads annotation template
+    from vidi import Annotator
+    A = Annotator()
+    A.load('/home/z/work/pneumonia/extra.json')
+    print(A)
+```
+"""
