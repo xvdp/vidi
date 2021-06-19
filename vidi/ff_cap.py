@@ -6,12 +6,13 @@ from .utils import Col, dprint
 
 class FFcap:
 
-    def __init__(self, name='vid.avi', size=(640, 480), fps=30, increment=True, overwrite=True,
+    def __init__(self, name='vid.avi', size=(480, 640), fps=30, increment=True, overwrite=True,
                  pix_fmt="rgb24", src_type="stdin", debug=False):
         """
         Args
             name        name of output video
-            size        tuple (width, height) [640,480]
+            size        tuple (height, width) [480, 640]
+                # since cap is intended to stream  H,W,C image format, arugment is flipped visavis ffmpeg
             fps         int, float [30]
             increment   bool [True], early closure does not corrupt file
             overwrite   bool [True],  overwrite file if found
@@ -24,7 +25,7 @@ class FFcap:
 
         Example:
 
-            with vidi.FFcap("myvid.mp4", pix_fmt='rgb24, fps=29.97, size=(640,480), overwrite=True, debug=True, src_type='stdin') as F:
+            with vidi.FFcap("myvid.mp4", pix_fmt='rgb24, fps=29.97, size=(480,640), overwrite=True, debug=True, src_type='stdin') as F:
                 F.add_frame(ndarray)
         """
 
@@ -42,7 +43,7 @@ class FFcap:
         assert pix_fmt in ("rgb24", "gray")
         self.pix_fmt = pix_fmt
         self._channels = 3 if pix_fmt == "rgb24" else 1
-        self._shape = self.size + (self._channels,)
+        self.shape = self.size + (self._channels,)
         assert src_type in ("stdin"), NotImplementedError
         self.src_type = src_type
 
@@ -103,8 +104,7 @@ class FFcap:
         #     self.increment = False
         #     self._cmd += ['-vcodec', 'libx264']
 
-        # image size: if image size != frame size given, this will fail
-        self._cmd += ['-s', '%dx%d'%self.size]
+        self._cmd += ['-s', '%dx%d'%(self.size[1], self.size[0])]
         self._cmd += ['-pix_fmt', self.pix_fmt]
 
         # frames per second in resulting video
@@ -133,7 +133,7 @@ class FFcap:
         """
         if self.debug:
             print('%sadd_frame() %d %s%s'%(Col.BB, self._framecount, str(frame.shape), Col.AU), end="\r")
-        assert frame.shape == self._shape, "attempting to input incorrect file size, <%s> instead of <%s>"%(str(frame.shape), str(self._shape))
+        assert frame.shape == self.shape, "attempting to input incorrect file size, <%s> instead of <%s>"%(str(frame.shape), str(self.shape))
         self._pipe.stdin.write(frame.tobytes())
         self._framecount += 1
 
