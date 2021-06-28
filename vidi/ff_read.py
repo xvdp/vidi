@@ -1,4 +1,5 @@
 """
+# TODO: cleanup and deprecate
 pipe to numpy
 """
 import platform

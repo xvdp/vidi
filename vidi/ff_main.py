@@ -1,9 +1,11 @@
 """File to handle all ffmpeg requests"""
 import os
+import os.path as osp
 import subprocess as sp
 from platform import system
-from .io_main import IO
+import numpy as np
 import json
+from .io_main import IO
 
 class FF():
     """wrapper class to ffmpeg, ffprobe, ffplay
@@ -74,7 +76,7 @@ class FF():
         """file statistics
             Fix, some file types are missing these stats, eg. webm
         """
-        _ext = os.path.splitext(self.file)
+        _ext = osp.splitext(self.file)
         if _ext in ['.gif', '.webm']:
             pass
             #TODO implement full read of file to get stats
@@ -212,15 +214,14 @@ class FF():
         sp.call(_fcmd)
 
 
-    def export_frames(self, fname=None, out_name=None, out_format='.png',
+    def export_frames(self, out_name=None, out_format='.png',
                       start=0, num_frames=1, scale=1):
         """extract frames from video
             fname:
         """
-        self._valid(fname)
 
         if out_name is None:
-            out_name = os.path.splitext(self.file)[0] + self.stats['pad']
+            out_name = osp.splitext(self.file)[0] + self.stats['pad']
 
         if isinstance(start, float):
             _time = self.strftime(start)
@@ -242,11 +243,10 @@ class FF():
         print(" ".join(_fcmd))
         sp.Popen(_fcmd, stdin=sp.PIPE, stderr=sp.PIPE)
 
-        return os.path.abspath(out_name)
+        return osp.abspath(out_name)
 
-
-    def export_clip(self, fname=None, out_name=None,
-                    out_format=None, start_frame=0, num_frames=0, scale=1):
+    def export_clip(self, out_name=None,
+                    start_frame=0, num_frames=0, scale=1):
         """extract video clip
             options:
                 formats, [same], '.webm', '.gif'
@@ -254,13 +254,16 @@ class FF():
                 clip range, [No clipping]
 
         """
-        self._valid(fname)
-        # format
-        if out_format is None:
-            out_format = os.path.splitext(self.file)[1]
         # auto out name
         if out_name is None:
-            out_name = os.path.splitext(self.file)[0]+ '_' + str(start_frame) + '-' + str(num_frames+start_frame)
+            out_name = osp.splitext(self.file)[0]+ '_' + str(start_frame) + '-' + str(num_frames+start_frame)
+        
+        # format
+
+        out_name, out_format = osp.splitext(out_name)
+        if not out_format:
+            out_format = osp.splitext(self.file)[1]
+
         # clipping
         if num_frames == 0:
             num_frames = self.stats['frames'] - start_frame
@@ -286,7 +289,6 @@ class FF():
 
         out_name = out_name + out_format
         _fcmd = _fcmd + [out_name]  #, '-hide_banner'
-        print(_fcmd)
         _p = sp.Popen(_fcmd, stdin=sp.PIPE, stderr=sp.PIPE)
         # for stdout_line in iter(_p.stdout.readline, ""):
         #     yield stdout_line
@@ -295,6 +297,65 @@ class FF():
         # if _ret:
         #     raise sp.CalledProcessError(_ret, _fcmd)
         return out_name
+
+    def to_numpy(self, start=0, num_frames=None, scale=1):
+        """  TODO check it will fit in RAM
+        """
+        #{'width': 512, 'height': 512, 'rate': 30.0, 'frames': 69, 'pad': '%02d', 'type': 'video', 'file': 'infrerence_6000.mp4'
+        out = []
+
+        self._get_stats()
+        num_frames = self.stats["frames"] if num_frames is None else min(self.stats["frames"], num_frames + start)
+
+        if isinstance(start, float):
+            _time = self.strftime(start)
+            start = self.time_to_frame(start)
+        else:
+            _time = self.frame_to_time(start)
+
+        _fcmd = [self.ffmpeg, '-i', self.file, '-ss', _time, '-start_number', str(start), '-f', 'rawvideo']
+
+        width = self.stats['width']
+        height = self.stats['height']
+        if scale != 1:
+            width = int(self.stats['width'] * scale)
+            height = int(self.stats['height'] * scale)
+            _scale = ['-s', '%dx%d'%(width, height)]
+            _fcmd = _fcmd + _scale
+        _fcmd += ['pipe:']
+
+        bufsize = width*height*3
+
+        proc = sp.Popen(_fcmd, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, bufsize=bufsize)
+
+        for i in range(start, num_frames):
+            buffer = proc.stdout.read(bufsize)
+            if len(buffer) != bufsize:
+                break
+            out += [np.frombuffer(buffer, np.uint8).reshape(height, width, 3)]
+        out = np.stack(out, axis=0)
+        proc.stdout.close()
+        proc.wait()
+        return out
+
+  
+        # def stream(stream_spec, cmd='ffmpeg', capture_stderr=False, input=None, quiet=False, overwrite_output=False):
+
+#     args = compile(stream_spec, cmd, overwrite_output=overwrite_output)
+
+#     # calculate framezie
+#     framesize = _get_frame_size(stream_spec)
+
+#     stdin_stream = subprocess.PIPE if input else None
+#     stdout_stream = subprocess.PIPE
+#     stderr_stream = subprocess.PIPE if capture_stderr or quiet else None
+#     p = subprocess.Popen(args, stdin=stdin_stream, stdout=stdout_stream, stderr=stderr_stream)
+
+#     while p.poll() is None:
+#         yield _read_frame(p, framesize)
+
+# def _read_frame(process, framesize):
+#     return process.stdout.read(framesize)
 
 
 """

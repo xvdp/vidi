@@ -17,7 +17,7 @@ class FFcap:
             increment   bool [True], early closure does not corrupt file
             overwrite   bool [True],  overwrite file if found
 
-            pix_fmt     str ['rgb24'], 'rgb24', 'gray' 
+            pix_fmt     str ['rgb24'], 'rgb24', 'gray'
                 # should pass any of `ffmpeg -pix_fmts`  but #'yuv420p' does not work
 
 

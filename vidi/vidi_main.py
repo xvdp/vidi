@@ -1,4 +1,6 @@
-"""vidi main,  file for motion pose video analysis"""
+"""
+TODO cleanum and depraecate
+vidi main,  file for motion pose video analysis"""
 
 import os
 import os.path as osp

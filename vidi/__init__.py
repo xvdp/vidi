@@ -1,5 +1,5 @@
 from .version import version as __version__
-from .vidi_main import VIDI
+# from .vidi_main import VIDI
 from .io_main import IO
 from .ff_main import FF
 # from .cv_main import CV
@@ -7,5 +7,5 @@ from .ff_main import FF
 
 from .ff_fun import *
 from .ff_cap import FFcap
-from .ff_read import FFread
-from .ff_dataset import AVDataset
+# from .ff_read import FFread
+# from .ff_dataset import AVDataset

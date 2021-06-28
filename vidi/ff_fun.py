@@ -1,5 +1,6 @@
 """
 ffmpeg, ffplay, ffprobe wrapper using pipes
+functions file
 
 """
 import os
@@ -9,9 +10,9 @@ import subprocess as sp
 from platform import system
 
 from .utils import *
+from .ff_main import FF
 
-__all__ = ["ffplay", "ffstitch", "ffprobe"]
-
+__all__ = ["ffplay", "ffstitch", "ffprobe", "ffread"]
 
 def ffprobe(src, entries=None, verbose=False):
     """ Wrapper for ffprobe, returning size, frame rate, number of frames
@@ -71,7 +72,7 @@ def ffprobe(src, entries=None, verbose=False):
     #_pipe.terminate()
     return stats
 
-def ffplay(src, folder=None, start=0, fps=None, loop=0, autoexit=True, fullscreen=False):
+def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, noborder=True):
     """
     Args:
         src (str)
@@ -85,16 +86,13 @@ def ffplay(src, folder=None, start=0, fps=None, loop=0, autoexit=True, fullscree
         loop    (int[0]) : number of loops, 0: forever
 
     Examples:
-    vidi.ffplay("metro%08d.png", start=9000)
-    vidi.ffplay("*.png")
-    vidi.ffplay("metro%08d.png", folder="~/work/gans/pix2pix/results/color_kaiming", fps=100, start=5)
-    vidi.ffplay("metro_color.mov", folder="~") #, fps=100, start=5 not implemneted for mov
+        >>> vidi.ffplay("metro%08d.png", start=9000) # patterned files local folder
+        >>> vidi.ffplay("*.png")   # pngs local folder
+        >>> vidi.ffplay(""~/mypath/metro%08d.png", fps=100, start=5)
+        >>> vidi.ffplay(""~/mypath") # files in folder - if only one extension type found
+        >>> vidi.ffplay("~/metro_color.mov")
     """
-    _cwd = os.getcwd()
-    if folder is not None:
-        folder = osp.abspath(osp.expanduser(folder))
-        assert osp.isdir(folder), "%sfolder <%s> does not exist%s"%(Col.RB, folder, Col.AU)
-        os.chdir(folder)
+    src = _format_src(src)
 
     fcmd = ["ffplay"]
 
@@ -106,29 +104,30 @@ def ffplay(src, folder=None, start=0, fps=None, loop=0, autoexit=True, fullscree
         print("%sfps not supported for <%s>%s"%(Col.YB, src, Col.AU))
 
     # file lists and folders
-    fcmd += _ff_format_input_list(src, start, folder)
+    fcmd += _ff_format_input_list(src, start)
     fcmd += ["-loop", str(loop)]
     if autoexit:
         fcmd += ["-autoexit"]
+    if noborder:
+        fcmd += ["-noborder"]
     if fullscreen:
         fcmd += ["-fs"]
+    # if alwaysontop: # not on ubuntu 18
+    #     fcmd += ["-alwaysontop"]
     fcmd += ["-i", src]
 
     _ffplaymsg(fcmd, msg="Running ffplay on folder")
 
     sp.call(fcmd)
 
-    if folder is not None:
-        os.chdir(_cwd)
-
-def ffstitch(src, dst, folder=None, fps=29.97, start=0, size=None, num=None, audio=None): # dst, src, audio, fps, size, start_img, max_img)
+def ffstitch(src, dst, fps=29.97, start=0, size=None, num=None, audio=None):
     """ stitches folder of files to video
+    TODO wrap ff_main instead
     Args
        required:
-        src         (str)   "*.<ext>" or "<name>%0<pad>d.<ext>"
+        src         (str)   "*.<ext>" | "<name>%0<pad>d.<ext>" | foldername
         dst         (str)   "<name>.<ext>"
        optional:
-        folder      (str [None]) source folder
         fps         (float [29.97]) frames per second
         start       (int [0]) start frame
         size        ((int,int) [None]), resize output to
@@ -145,12 +144,7 @@ def ffstitch(src, dst, folder=None, fps=29.97, start=0, size=None, num=None, aud
 
         #ffmpeg -r 29.97 -i "metro%08d.png" -start_number 6468 -vframes 200 -vcodec libx264 -pix_fmt yuv420p /home/z/metro_color.mov
     """
-    _cwd = os.getcwd()
-
-    if folder is not None:
-        folder = osp.abspath(osp.expanduser(folder))
-        assert osp.isdir(folder), "%sfolder <%s> does not exist%s"%(Col.RB, folder, Col.AU)
-        os.chdir(folder)
+    src = _format_src(src)
 
     print("-------------Running vidi.ffstitch()-------------")
 
@@ -188,10 +182,21 @@ def ffstitch(src, dst, folder=None, fps=29.97, start=0, size=None, num=None, aud
     print(" -------------------------------------")
     sp.call(_fcmd)
 
-    if folder is not None:
-        os.chdir(_cwd)
-        dst = osp.join(folder, dst)
     return dst
+
+def ffread(src):
+    """ converts to numpy using FF class
+    Args
+        src, valid video file
+    TODO: RAM checking - this is brute force conversion and if video is too large will explode ram
+    TODO: could include cropping
+    """
+    assert osp.isfile(src), f"{src} not found"
+    # ext = osp.splitext(src)[1].lower()
+    # if ext not in ('.mkv', '.avi', '.mp4', '.mov', '.flv'):
+    #     raise NotImplementedError(f"video format not supported {}")
+    return FF(src).to_numpy()
+
 
 
 def _ffprobe_parse_stat(stat):
@@ -225,15 +230,21 @@ def _ffplaymsg(fcmd="", msg=""):
     print("  RMC            jump to percentage of film")
     print("--------------------------", Col.AU)
 
+def _format_src(src):
+    src = osp.abspath(osp.expanduser(src))
+    if osp.isdir(src):
+        files = sorted([f.name for f in os.scandir(src)
+                        if osp.splitext(f.name)[1].lower() in (".jpg", ".jpeg", ".png")])
+        exts = list(set([osp.splitext(f)[1] for f in files]))
+        assert len(exts) == 1, f"one and only one extension supported found {exts}"
+        src = osp.join(src, f"*{exts[0]}")
+    return src
 
-def _ff_check_sequence(src, start=0, folder=None):
+def _ff_check_sequence(src, start=0):
     """ 
     Validate first frame of a sequence, and sequence exist
     Return None if invalid, <int> if valid
     """
-    if folder is not None:
-        src = osp.join(folder, src)
-
     if osp.isfile(src%start):
         return start
 
@@ -254,17 +265,16 @@ def _ff_check_sequence(src, start=0, folder=None):
 
 
 
-def _ff_format_input_list(src, start=0, folder=None):
+def _ff_format_input_list(src, start=0):
     """Format name to ffmpeg str
     Args
         src     (str)     input
         start   (int [0]) start frame
-        folder  (str [None])
     """
     fcmd = []
     # patterned file sequence, eg. metro%0d.png
     if '%' in src:
-        _start = _ff_check_sequence(src, start, folder)
+        _start = _ff_check_sequence(src, start)
         assert _start is not None, "%sno files with pattern <%s> found%s"%(Col.RB, src, Col.AU)
         if _start != start:
             print("%sstart frame <%d> not found, using <%d> instead%s"%(Col.YB, start, _start, Col.AU))
