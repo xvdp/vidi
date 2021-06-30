@@ -1,11 +1,15 @@
-from .version import version as __version__
-# from .vidi_main import VIDI
+""" wrapper to ffmpeg video
+"""
 from .io_main import IO
 from .ff_main import FF
-# from .cv_main import CV
-# from .annotator import Annotator
 
 from .ff_fun import *
 from .ff_cap import FFcap
+
+
+# TODO fix torch video dataset with augmentation
 # from .ff_read import FFread
 # from .ff_dataset import AVDataset
+
+#pylint: disable=import-error
+from .version import version as __version__

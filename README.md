@@ -47,13 +47,13 @@ with vidi.FFcap('myvideo.mp4', size=(256,256)) as F:
 # only tested with filenames in .mp4, .avi, pix_fmt='rbg24' and 'gray'
 ```
 
+## video to ndarray
+```python
+out = vidi.ffread('myvideofile')
+```
+
 ## video to clip
 ```python
 f = vidi.FF("myvideo.mp4")
 f.export_clip(out_name="myclip.mp4", num_frames=4, scale=0.5)
-```
-
-# video to ndarray
-```python
-out = vidi.ffread('myvideofile')
 ```

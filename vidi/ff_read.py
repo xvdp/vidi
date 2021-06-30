@@ -10,6 +10,7 @@ import torch
 from .utils import *
 from .ff_fun import ffprobe
 
+# pylint: disable=no-member
 class FFread:
 
     def __init__(self, src, batch_size=1, out_type="numpy", start=None, frames=None,

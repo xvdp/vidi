@@ -53,8 +53,7 @@ class FF():
         # only clobber self.file is fname exists
         if fname is None:
             fname = self.file
-        self.file = self._io.file_resolve(fname)
-        if self.file is not None:
+        if osp.isfile(self.file):
             self._get_stats()
 
     def _valid(self, fname=None):
