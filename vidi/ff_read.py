@@ -248,4 +248,3 @@ class FFread:
         if _frames < self.frames:
             print("%sskipping last %d frames from batch%s"%(Col.YB, (self.frames - _frames), Col.AU))
             self.frames = _frames
-

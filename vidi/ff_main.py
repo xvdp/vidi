@@ -213,7 +213,6 @@ class FF():
         print(" ".join(_fcmd))
         sp.call(_fcmd)
 
-
     def export_frames(self, out_name=None, out_format='.png',
                       start=0, num_frames=1, scale=1):
         """extract frames from video
@@ -313,7 +312,7 @@ class FF():
         else:
             _time = self.frame_to_time(start)
 
-        _fcmd = [self.ffmpeg, '-i', self.file, '-ss', _time, '-start_number', str(start), '-f', 'rawvideo']
+        _fcmd = [self.ffmpeg, '-i', self.file, '-ss', _time, '-start_number', str(start), '-f', 'rawvideo', '-pix_fmt', 'rgb24']
 
         width = self.stats['width']
         height = self.stats['height']
@@ -359,6 +358,13 @@ class FF():
 
 
 """
+# lossless
+ffmpeg -i left.avi -i right.avi -filter_complex hstack -c:v ffv1 output.avi
+# lossy
+ffmpeg -i left.avi -i right.avi -filter_complex "hstack,format=yuv420p" -c:v libx264 -crf 18 output.mp4
+# audio
+# ffmpeg -i left.avi -i right.avi -filter_complex "[0:v][1:v]hstack,format=yuv420p[v];[0:a][1:a]amerge[a]" -map "[v]" -map "[a]" -c:v libx264 -crf 18 -ac 2 output.mp4
+
 snippets
 https://trac.ffmpeg.org/wiki/FFprobeTips
 

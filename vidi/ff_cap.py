@@ -78,11 +78,11 @@ class FFcap:
     def close(self):
         if self._pipe is not None:
             dprint('%sClosing PIPE%s'%(Col.YB, Col.AU), debug=self.debug)
-            
+
             self._pipe.stdin.flush()
             self._pipe.stdin.close()
             self._pipe.stderr.close()
-            self._pipe.terminate()
+            self._pipe.wait()
             # self._pipe.kill()
         self._pipe = None
         dprint('%sPIPE Closed%s'%(Col.YB, Col.AU), debug=self.debug)
