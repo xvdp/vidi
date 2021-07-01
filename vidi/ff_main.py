@@ -176,7 +176,7 @@ class FF():
                 size = "%dx%d"%size
         return size
 
-    def stitch(self, dst, src, audio, fps, size, start_img, max_img):
+    def stitch(self, dst, src, audio, fps, size, start_img, max_img, pix_fmt="yuv420p"):
         """
         ffmpeg -r 29.97 -start_number 5468 -i metro%08d.png -vcodec libx264 -pix_fmt yuv420p /home/z/metropolis_color.mov
         ffmpeg -r 29.97 -start_number 5468 -i metro%08d.png -vcodec libx264 -pix_fmt yuv420p -vframes 200 /home/z/metro_col.mov #only 200 frames
@@ -202,7 +202,7 @@ class FF():
         if audio is not None:
             _fcmd += ['-acodec', 'copy']
 
-        _fcmd += ['-pix_fmt', 'yuv420p']
+        _fcmd += ['-pix_fmt', pix_fmt]
         _fcmd += [dst]
 
         # number of frames # has to be just before outpyut

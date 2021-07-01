@@ -11,5 +11,10 @@ from .ff_cap import FFcap
 # from .ff_read import FFread
 # from .ff_dataset import AVDataset
 
+# TODO add stack
+
+#ffmpeg -i vid_l.mp4 -i vid_r.mp4 -filter_complex hstack -c:v libx264 out.mp4
+
+
 #pylint: disable=import-error
 from .version import version as __version__

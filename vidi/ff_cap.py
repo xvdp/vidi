@@ -20,7 +20,6 @@ class FFcap:
             pix_fmt     str ['rgb24'], 'rgb24', 'gray'
                 # should pass any of `ffmpeg -pix_fmts`  but #'yuv420p' does not work
 
-
             src_type      str ['stdin'] 'stdin' | (not implemented): 'screen'| webcam | ximea
 
         Example:
@@ -40,7 +39,7 @@ class FFcap:
 
         self.increment = increment
         self.overwrite = overwrite
-        assert pix_fmt in ("rgb24", "gray")
+        # assert pix_fmt in ("rgb24", "gray")
         self.pix_fmt = pix_fmt
         self._channels = 3 if pix_fmt == "rgb24" else 1
         self.shape = self.size + (self._channels,)
