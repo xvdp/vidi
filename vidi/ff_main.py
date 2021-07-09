@@ -410,7 +410,7 @@ class FF():
                 buffer = proc.stdout.read(bufsize)
                 if len(buffer) != bufsize:
                     break
-                out += [np.frombuffer(buffer, dtype).reshape(height, width, 3)]
+                out += [np.frombuffer(buffer, dtype=np.uint8).reshape(height, width, 3).astype(dtype)]
         out = np.stack(out, axis=0)
 
         # TODO: this assumes that video input is uint8 but thats not a given - must validate pixel format
