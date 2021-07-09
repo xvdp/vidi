@@ -259,7 +259,7 @@ class AVDataset(Dataset):
         if value is None or isinstance(value, int):
             return value
         if isinstance(value, float): # interpret as time, return frame
-            return time_to_frame(value, fps=self.stats["avg_frame_rate"])
+            return time_to_frame(value, fps=self.stats["rate"])
         assert False, "%sexpected int (frames) or float (time), got %s%s"%(Col.RB, str(type(value)), Col.AU)
 
     def _as_time(self, value):
@@ -267,7 +267,7 @@ class AVDataset(Dataset):
         if value is None or isinstance(value, float):
             return value
         if isinstance(value, int): # interpret as frame, return time
-            return frame_to_time(value, fps=self.stats["avg_frame_rate"])
+            return frame_to_time(value, fps=self.stats["rate"])
         assert False, "%sexpected int (frames) or float (time), got %s%s"%(Col.RB, str(type(value)), Col.AU)
 
     def parse_ftransform(self, ftransform):

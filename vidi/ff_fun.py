@@ -1,7 +1,6 @@
 """
+functional
 ffmpeg, ffplay, ffprobe wrapper using pipes
-functions file
-
 """
 import os
 import os.path as osp
@@ -14,63 +13,14 @@ from .ff_main import FF
 
 __all__ = ["ffplay", "ffstitch", "ffprobe", "ffread"]
 
-def ffprobe(src, entries=None, verbose=False):
+def ffprobe(src, entries=None, stream=0, verbose=False):
     """ Wrapper for ffprobe, returning size, frame rate, number of frames
-    Args
-        src, video
-        entries, subsection of _entries
-
-    more info https://trac.ffmpeg.org/wiki/FFprobeTips
     """
     assert osp.isfile(src), "%sinexistent file <%s>%s"%(Col.RB, src, Col.AU)
 
-    _entries = ["index", "codec_name", "codec_type", "width", "height", "pix_fmt",
-                "avg_frame_rate", "start_time", "duration", "nb_frames"]
-    _video_entries = ["avg_frame_rate", "start_time", "duration", "nb_frames"]
-
-    if entries is not None:
-        if isinstance(entries, str):
-            entries = [entries]
-        _entries = _ffprobe_sort_entries(entries, _entries, verbose)
-
-    _v = "info" if verbose else "error"
-    _fcmd = ["ffprobe", "-v", _v]
-    _fcmd += ["-show_entries", "stream="+",".join(_entries)]
-    _fcmd += ["-of", "default=noprint_wrappers=1:nokey=1"]
-    _fcmd += [src]
-    _fcmd = " ".join(_fcmd)
-
-    if verbose:
-        print("%s%s%s"%(Col.GB, _fcmd, Col.AU))
-
-    if verbose:
-        T = Timer(_fcmd)
-
-    try:
-        _pipe = os.popen(_fcmd)
-        if verbose:
-            T.tic("open ffprobe pipe")
-
-        stats = {}
-
-        try:
-            for i, _e in enumerate(_entries):
-                stats[_e] = _ffprobe_parse_stat(_pipe.readline())
-                if verbose:
-                    T.tic("read <%s>"%_e)
-
-        except:
-            if not verbose:
-                print("%sfailed at read line %s on %s%s"%(Col.RB, _e, _fcmd, Col.AU))
-            stats['file'] = src
-    except:
-        print("%sCannot run ffprobe on <%s>%s"%src)
-
-    if verbose:
-        T.toc()
-    _pipe.close()
-    #_pipe.terminate()
-    return stats
+    V = FF(src)
+    full_stats = V.get_video_stats(stream=stream, entries=entries, verbose=verbose)
+    return V.stats
 
 def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, noborder=True):
     """
@@ -184,7 +134,7 @@ def ffstitch(src, dst, fps=29.97, start=0, size=None, num=None, audio=None):
 
     return dst
 
-def ffread(src):
+def ffread(src, nb_frames=None, step=1):
     """ converts to numpy using FF class
     Args
         src, valid video file
@@ -195,27 +145,7 @@ def ffread(src):
     # ext = osp.splitext(src)[1].lower()
     # if ext not in ('.mkv', '.avi', '.mp4', '.mov', '.flv'):
     #     raise NotImplementedError(f"video format not supported {}")
-    return FF(src).to_numpy()
-
-
-
-def _ffprobe_parse_stat(stat):
-    """if stat.isnumeric(): only handles ints"""
-    stat = stat.replace('\n', '')
-    try:
-        stat = eval(stat)
-    except:
-        pass
-    return stat
-
-def _ffprobe_sort_entries(requested, dictionary, verbose=False):
-    out = [_e for _e in dictionary if _e in requested]
-    _fail = [_e for _e in requested if _e not in out]
-    if verbose:
-        print("%sRequested entries found: %s%s"%(Col.GB, str(out), Col.AU))
-    if _fail:
-        print("%sRequested entries not found: %s%s"%(Col.RB, str(_fail), Col.AU))
-    return out
+    return FF(src).to_numpy(nb_frames=nb_frames, step=step)
 
 
 def _ffplaymsg(fcmd="", msg=""):

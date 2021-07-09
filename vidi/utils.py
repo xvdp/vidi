@@ -1,6 +1,10 @@
 import time
 import numpy as np
-import torch
+with_torch = True
+try:
+    import torch
+except:
+    with_torch = False
 class Col:
     AU = '\033[0m'
     BB = '\033[94m\033[1m'

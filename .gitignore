@@ -4,3 +4,4 @@ tests/res/
 sandbox/
 .ipynb_checkpoints/
 *.egg-info/
+version.py

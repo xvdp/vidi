@@ -3,9 +3,6 @@ import sys
 from setuptools import setup, find_packages
 
 
-if sys.version_info[:2] < (3, 4):
-    raise RuntimeError("Python version >= 3.4 required.")
-
 def _readme():
     with open('README.md') as fo_:
         return fo_.read()
@@ -15,11 +12,12 @@ def set_version(version):
         _fi.write("version='"+version+"'")
     return version
 
+def install_requires():
+    with open('requirements.txt') as _fo:
+        return _fo.read().split()
+
 def setup_package():
     ''' setup '''
-
-    install_requires = ['numpy']
-
     metadata = dict(
         name='vidi',
         version=set_version(version='0.1'),
@@ -28,7 +26,7 @@ def setup_package():
         author='xvdp',
         author_email='xvdp@gmail.com',
         packages=find_packages(),
-        install_requires=install_requires,
+        install_requires=['kotools @ git+https://github.com/xvdp/kotools@main', 'numpy>=1.15'],
         long_description=_readme(),
         zip_safe=False)
 
