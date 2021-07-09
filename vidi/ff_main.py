@@ -3,9 +3,9 @@ import os
 import os.path as osp
 import subprocess as sp
 import platform
-import numpy as np
 import json
-from kotools import CPUse
+import numpy as np
+from kotools import CPUse, GPUse, Col
 
 from .io_main import IO
 
@@ -328,7 +328,31 @@ class FF():
         #     raise sp.CalledProcessError(_ret, _fcmd)
         return out_name
 
-    def to_numpy(self, start=0, nb_frames=None, scale=1, stream=0, step=1, dtype=np.uint8):
+    def fits_in_memory(self, nb_frames=None, dtype_size=1, with_grad=0, scale=1, stream=0,
+                       memory_type="GPU", step=1):
+        """
+            returns max number of frames that fit in memory
+        """
+        for stat in ['nb_frames', 'width', 'height']:
+            if stat not in self.stats:
+                self.get_video_stats(stream=stream)
+
+        nb_frames = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'], nb_frames)
+
+        width = self.stats['width'] * scale
+        height = self.stats['height'] * scale
+        _requested_ram = (nb_frames * width * height * dtype_size * (1 + with_grad))/step//2**20
+        _available_ram = CPUse().available if memory_type == "CPU" else GPUse().available
+
+        if _requested_ram > _available_ram:
+            max_frames = int(nb_frames * _available_ram // _requested_ram)
+            _msg = f"{Col.B}Cannot load [{nb_frames},{height},{width},3] frames in {memory_type} {Col.RB}"
+            _msg += f"{_available_ram} MB{Col.YB}, loading only {max_frames} frames {Col.AU}"
+            print(_msg)
+            nb_frames = max_frames
+        return nb_frames
+
+    def to_numpy(self, start=0, nb_frames=None, scale=1, stream=0, step=1, dtype=np.uint8, memory_type="CPU"):
         """
         read video to numpy
         Args
@@ -340,8 +364,8 @@ class FF():
 
         TODO: loader iterator yield
         TODO: crop or transform
+        TODO check input depth bytes, will fail if not 24bpp
         """
-
         self.get_video_stats(stream=stream)
         nb_frames = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'], nb_frames + start)
 
@@ -351,7 +375,8 @@ class FF():
         else:
             _time = self.frame_to_time(start)
 
-        _fcmd = [self.ffmpeg, '-i', self.file, '-ss', _time, '-start_number', str(start), '-f', 'rawvideo', '-pix_fmt', 'rgb24']
+        _fcmd = [self.ffmpeg, '-i', self.file, '-ss', _time, '-start_number', str(start),
+                 '-f', 'rawvideo', '-pix_fmt', 'rgb24']
 
         width = self.stats['width']
         height = self.stats['height']
@@ -362,14 +387,10 @@ class FF():
             _fcmd = _fcmd + _scale
         _fcmd += ['pipe:']
 
-        bufsize = width*height*3 # bytes per image
-        _requested_ram = (bufsize * nb_frames * np.dtype(dtype).itemsize)//2**20
-        _available_ram = CPUse().available
+        bufsize = width*height*3
 
-        if _available_ram > _requested_ram:
-            max_frames = nb_frames * _available_ram // _requested_ram
-            print(f"Cannot load {nb_frames} frames in available ram {_available_ram}MB, max frames per chunk {max_frames},... notthing done ")
-            return None
+        nb_frames = self.fits_in_memory(nb_frames, dtype_size=np.dtype(dtype).itemsize, scale=scale,
+                                        stream=stream, memory_type=memory_type, step=step)
 
         proc = sp.Popen(_fcmd, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, bufsize=bufsize)
         out = self._to_numpy_proc(start, nb_frames, step, width, height, dtype, bufsize, proc)
@@ -398,9 +419,8 @@ class FF():
         del buffer
 
         return out
-  
+    
         # def stream(stream_spec, cmd='ffmpeg', capture_stderr=False, input=None, quiet=False, overwrite_output=False):
-
 #     args = compile(stream_spec, cmd, overwrite_output=overwrite_output)
 
 #     # calculate framezie
