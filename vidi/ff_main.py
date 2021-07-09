@@ -219,13 +219,16 @@ class FF():
         sp.call(_fcmd)
 
     def export_frames(self, out_name=None, out_format='.png',
-                      start=0, nb_frames=1, scale=1, stream=0):
+                      start=0, nb_frames=None, scale=1, step=1, stream=0):
         """extract frames from video
             fname:
         """
+        # ffmpeg -i  PXL_20210602_185231150.mp4 -r 4 -s 300x500 -vf mpdecimate,setpts=N/FRAME_RATE/TB z_exp_1/dec7_%06d.png
         # -map 0:v first video stream
         if not self.stats:
             self.get_video_stats(stream=stream)
+    
+        nb_frames = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'], nb_frames)
 
         if out_name is None:
             out_name = osp.splitext(self.file)[0] + self.stats['pad']
@@ -244,6 +247,9 @@ class FF():
             _scale = ['-s', '%dx%d'%(int(self.stats['width'] * scale), int(self.stats['height'] * scale))]
             _fcmd = _fcmd + _scale
             out_name = out_name + '_' + str(scale)
+
+        if step > 1:
+            _fcmd += ['-r', str(self.stats['rate'] // step), '-vf', 'mpdecimate,setpts=N/FRAME_RATE/TB']
 
         out_name = out_name + out_format
         _fcmd.append(out_name)
