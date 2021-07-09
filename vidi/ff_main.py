@@ -34,33 +34,6 @@ class FF():
         self.stats = {}
         self._io = IO()
         self.file = fname
-        #self._resolve_filen(fname)
-
-    def help(self):
-        """print examples"""
-        _help = """
-            >>> from vidi import FF
-            >>> f = FF('MUCBCN.mp4')
-            >>> print(f.stats)
-            >>> c = f.export_clip(start_frame=100, nb_frames=200) #output video clip
-            # output scalled reformated video clip
-            >>> d = f.export_clip(start_frame=500, nb_frames=300, out_format=".webm", scale=0.25)
-            # output images
-            >>> e = f.export_frames(out_format='.png', start_frame=100, nb_frames=5, scale=0.6)
-            >>> f.play(c)
-        """.format()
-        print(_help)
-
-    def _resolve_filen(self, fname=None):
-        # only clobber self.file is fname exists
-        if fname is None:
-            fname = self.file
-        if osp.isfile(self.file):
-            self.get_video_stats()
-
-    def _valid(self, fname=None):
-        self._resolve_filen(fname)
-        assert self.file is not None, 'enter valid file'
 
     def _if_win(self):
         if platform.system() == 'Windows':
@@ -77,6 +50,8 @@ class FF():
         entries (list,tuple [None]) extra queries
         verbose (bool [False])
         """
+        if not osp.isfile(self.file):
+            print(f"{self.file} not a valid file")
 
         _cmd = f"{self.ffprobe} -v quiet -print_format json -show_format -show_streams {self.file}"
         with os.popen(_cmd) as _fi:
@@ -129,7 +104,8 @@ class FF():
 
     def frame_to_time(self, frame=0):
         """convert frame number to time"""
-        self._valid()
+        if not self.stats:
+            self.get_video_stats(stream=0)
         outtime = frame/self.stats['rate']
         return self.strftime(outtime)
 
@@ -146,7 +122,8 @@ class FF():
         ffplay -i metro.mov
         ffplay -start_number 5486 -i metro%08d.png
         """
-        self._valid(fname)
+        if not self.stats:
+            self.get_video_stats(stream=0)
 
         _fcmd = [self.ffplay, '-i', self.file]
         print(" ".join(_fcmd))
@@ -242,11 +219,13 @@ class FF():
         sp.call(_fcmd)
 
     def export_frames(self, out_name=None, out_format='.png',
-                      start=0, nb_frames=1, scale=1):
+                      start=0, nb_frames=1, scale=1, stream=0):
         """extract frames from video
             fname:
         """
         # -map 0:v first video stream
+        if not self.stats:
+            self.get_video_stats(stream=stream)
 
         if out_name is None:
             out_name = osp.splitext(self.file)[0] + self.stats['pad']
@@ -282,7 +261,8 @@ class FF():
                 clip range, [No clipping]
 
         """
-        self.get_video_stats(stream=stream)
+        if not self.stats:
+            self.get_video_stats(stream=stream)
 
         # auto out name
         if out_name is None:
@@ -333,9 +313,8 @@ class FF():
         """
             returns max number of frames that fit in memory
         """
-        for stat in ['nb_frames', 'width', 'height']:
-            if stat not in self.stats:
-                self.get_video_stats(stream=stream)
+        if not self.stats:
+            self.get_video_stats(stream=stream)
 
         nb_frames = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'], nb_frames)
 
@@ -366,7 +345,8 @@ class FF():
         TODO: crop or transform
         TODO check input depth bytes, will fail if not 24bpp
         """
-        self.get_video_stats(stream=stream)
+        if not self.stats:
+            self.get_video_stats(stream=stream)
         nb_frames = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'], nb_frames + start)
 
         if isinstance(start, float):

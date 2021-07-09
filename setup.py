@@ -26,7 +26,7 @@ def setup_package():
         author='xvdp',
         author_email='xvdp@gmail.com',
         packages=find_packages(),
-        install_requires=['kotools @ git+https://github.com/xvdp/kotools@main', 'numpy>=1.15'],
+        install_requires=['kotools@git+https://github.com/xvdp/kotools@main', 'numpy>=1.15'],
         long_description=_readme(),
         zip_safe=False)
 
