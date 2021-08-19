@@ -28,6 +28,8 @@ vidi.ffplay('metro_color_tb4.mov')
 vidi.ffplay("/home/z/myfolder/*.png")
 # play images with pattern in current folder
 vidi.ffplay("image%06d.jpg", loop=2, noborder=False,)
+# show frame numbers in yellow
+vidi.ffplay('metro_color_tb4.mov', showframe=True, fontcolor="yellow") 
 ```
 
 ## Stitch files to video
@@ -52,10 +54,16 @@ with vidi.FFcap('myvideo.mp4', size=(256,256)) as F:
 out = vidi.ffread(<videofile>)
 ```
 
-## video to clip
+## export video clip
 ```python
 f = vidi.FF(<videofile>)
 f.export_clip(out_name="myclip.mp4", num_frames=4, scale=0.5)
+```
+
+## export video frames
+```python
+f = vidi.FF(<videofile>)
+f.export_frames(out_name="myclip_%06d.png", num_frames=4, scale=0.5)
 ```
 
 ## video information

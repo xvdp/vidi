@@ -17,11 +17,11 @@ class FF():
             >>> from vidi import FF
             >>> f = FF('MUCBCN.mp4')
             >>> print(f.stats)
-            >>> c = f.clip(start_frame=100, nb_frames=200) #output video clip
+            >>> c = f.clip(start=100, nb_frames=200) #output video clip
             # output scalled reformated video clip
-            >>> d = f.clip(start_frame=500, nb_frames=300, out_format=".webm", scale=0.25)
+            >>> d = f.clip(start=500, nb_frames=300, out_format=".webm", scale=0.25)
             # output images
-            >>> e = f.get_frames(out_format='.png', start_frame=100, nb_frames=5, scale=0.6)
+            >>> e = f.get_frames(out_format='.png', start=100, nb_frames=5, scale=0.6)
             >>> f.play(c)
 
     """
@@ -81,7 +81,7 @@ class FF():
         elif 'avg_frame_rate' in _stats:
             self.stats['rate'] = eval(_stats['avg_frame_rate'])
 
-        self.stats['nb_frames']  = eval(_stats['nb_frames'])
+        self.stats['nb_frames'] = eval(_stats['nb_frames'])
         self.stats['type'] = 'video'
         self.stats['pad'] = "%%0%dd" %len(str(self.stats['nb_frames']))
 
@@ -116,16 +116,56 @@ class FF():
     def strftime(self, intime):
         return '%02d:%02d:%02d.%03d'%((intime//3600)%24, (intime//60)%60, intime%60, (int((intime - int(intime))*1000)))
 
-    def play(self, fname=None):
+    def play(self,start=0, fps=None, loop=0, autoexit=True, fullscreen=False, noborder=True, showframe=False, fontcolor="white"):
         """ff play video
 
         ffplay -i metro.mov
         ffplay -start_number 5486 -i metro%08d.png
+
+   fcmd = ["ffplay"]
+
+    # if we are playing a folder not a single file
+    if '%' in src or '*' in src:
+        if fps is None:
+            fps = 29.97
+        fcmd += ["-framerate", str(fps)]
+    else:
+        if fps is not None:
+            print("%scustom fps not supported for <%s>%s"%(Col.YB, src, Col.AU))
+
+
+    # file lists and folders
+    fcmd += _ff_format_input_list(src, start)
+    fcmd += ["-loop", str(loop)]
+    if autoexit:
+        fcmd += ["-autoexit"]
+    if noborder:
+        fcmd += ["-noborder"]
+    if fullscreen:
+        fcmd += ["-fs"]
+    # if alwaysontop: # not on ubuntu 18
+    #     fcmd += ["-alwaysontop"]
+    fcmd += ["-i", src]
+
+    if showframe:
+        _cmd = f"drawtext=fontfile=Arial.ttf: x=(w-tw)*0.98: y=h-(2*lh): fontcolor={fontcolor}: fontsize=h*0.0185: " + "text='%{n}'"
+        fcmd += ["-vf", _cmd]        
         """
         if not self.stats:
             self.get_video_stats(stream=0)
 
-        _fcmd = [self.ffplay, '-i', self.file]
+        _fcmd = [self.ffplay, "-loop", str(loop)]
+        if autoexit:
+            _fcmd += ["-autoexit"]
+        if noborder:
+            _fcmd += ["-noborder"]
+        if fullscreen:
+            _fcmd += ["-fs"]
+        _fcmd += ['-i', self.file ]
+        if showframe:
+            _cmd = f"drawtext=fontfile=Arial.ttf: x=(w-tw)*0.98: y=h-(2*lh): fontcolor={fontcolor}: fontsize=h*0.0185: " + "text='%{n}'"
+            _fcmd += ["-vf", _cmd]   
+
         print(" ".join(_fcmd))
         print("-------Interaction--------")
         print(" 'q', ESC        Quit")
@@ -218,101 +258,125 @@ class FF():
         print(" ".join(_fcmd))
         sp.call(_fcmd)
 
-    def export_frames(self, out_name=None, out_format='.png',
-                      start=0, nb_frames=None, scale=1, step=1, stream=0):
-        """extract frames from video
-            fname:
+    def _export(self, start=0, nb_frames=None, scale=1, step=1, stream=0):
+        """ common to clip and frame exports
         """
-        # ffmpeg -i  PXL_20210602_185231150.mp4 -r 4 -s 300x500 -vf mpdecimate,setpts=N/FRAME_RATE/TB z_exp_1/dec7_%06d.png
-        # -map 0:v first video stream
         if not self.stats:
             self.get_video_stats(stream=stream)
-    
-        nb_frames = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'], nb_frames)
+        _rate = self.stats['rate']
+        _height = self.stats['height']
+        _width = self.stats['width']
 
-        if out_name is None:
-            out_name = osp.splitext(self.file)[0] + self.stats['pad']
-
+        # range start, frame and time
         if isinstance(start, float):
-            _time = self.strftime(start)
+            time_start = self.strftime(start)
             start = self.time_to_frame(start)
         else:
-            _time = self.frame_to_time(start)
+            time_start = self.frame_to_time(start)
 
-        print('exporting frame %s at time %s'%(start, _time))
-        _fcmd = [self.ffmpeg, '-i', self.file, '-ss', _time, '-start_number',
-                 str(start), '-vframes', str(nb_frames)]
+        # range size, number  and time
+        _max_frames = self.stats['nb_frames'] - start
+        if nb_frames is None:
+            nb_frames = _max_frames
+        else:
+            nb_frames = min(_max_frames, nb_frames)
+        time_end = str(nb_frames/_rate)
 
+        # export command
+        # '-vframes', str(nb_frames)]
+        cmd =  [self.ffmpeg, '-i', self.file, '-ss', time_start, '-t', time_end]
+
+        # resize
         if scale != 1:
-            _scale = ['-s', '%dx%d'%(int(self.stats['width'] * scale), int(self.stats['height'] * scale))]
-            _fcmd = _fcmd + _scale
-            out_name = out_name + '_' + str(scale)
+            cmd += ['-s', '%dx%d'%(int(_width * scale), int(_height * scale))]
 
         if step > 1:
-            _fcmd += ['-r', str(self.stats['rate'] // step), '-vf', 'mpdecimate,setpts=N/FRAME_RATE/TB']
+            cmd += ['-r', str(_rate // step), '-vf', 'mpdecimate,setpts=N/FRAME_RATE/TB']
 
-        out_name = out_name + out_format
-        _fcmd.append(out_name)
-        print(" ".join(_fcmd))
-        sp.Popen(_fcmd, stdin=sp.PIPE, stderr=sp.PIPE)
+        return cmd
+
+    def export_frames(self, out_name=None, start=0, nb_frames=None, scale=1, step=1, stream=0, out_folder=None):
+        """ extract frames from video
+        Args
+            out_name    (str)   # if no format in name ".png
+            start       (int|float [0])       default: start of input clip, if float, start is a time
+            nb_frames   (int [None]):   default: to end of clip
+            scale       (float [1]) rescale output
+            stream      (int [0]) if more than one stream in video
+            out_folder  optional, save to folder
+        """
+        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step, stream=stream)
+
+        # resolve name
+        if out_name is None:
+            out_name = osp.splitext(self.file)[0]
+
+        out_name, out_format = osp.splitext(out_name)
+        if out_format.lower() not in (".png", ".jpg", ".jpeg", ".bmp"):
+            out_format = ".png"
+
+        if scale != 1:
+            _pad = ""
+            if "%0" in out_name:
+                out_name, _pad = out_name.split("%0")
+                if out_name[-1] == "_":
+                    out_name = out_name[:-1]
+                _pad = "_%0" + _pad
+            out_name += f"_{scale}" + _pad
+
+        if not "%0" in out_name:
+            out_name += "_" + self.stats['pad']
+
+        out_name += out_format
+        if out_folder is not None:
+            out_folder = osp.abspath(out_folder)
+            os.makedirs(out_folder, exist_ok=True)
+            out_name = osp.join(out_folder, out_name)
+
+        cmd.append(out_name)
+        print(" ".join(cmd))
+        sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE)
 
         return osp.abspath(out_name)
 
-    def export_clip(self, out_name=None,
-                    start_frame=0, nb_frames=0, scale=1, stream=0):
-        """extract video clip
-            options:
-                formats, [same], '.webm', '.gif'
-                scale, [1]
-                clip range, [No clipping]
-
+    def export_clip(self, out_name=None, start=0, nb_frames=None, scale=1, step=1, stream=0, out_folder=None):
+        """ extract video clip
+        Args:
+            out_name    (str [None]) default is <input_name>_framein_frame_out<input_format>
+            start       (int | float [0])  default: start of input clip, if float: time
+            nb_frames   (int [None]):      default: to end of clip
+            scale       (float [1]) rescale output
+            stream      (int [0]) if more than one stream in video
         """
-        if not self.stats:
-            self.get_video_stats(stream=stream)
+        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step, stream=stream)
 
-        # auto out name
+        # resolve name
         if out_name is None:
-            out_name = osp.splitext(self.file)[0]+ '_' + str(start_frame) + '-' + str(nb_frames+start_frame)
-        
-        # format
+            out_name = osp.splitext(self.file)[0]+ '_' + str(start) + '-' + str(nb_frames+start)
 
+        # format
         out_name, out_format = osp.splitext(out_name)
         if not out_format:
             out_format = osp.splitext(self.file)[1]
 
-        # clipping
-        if nb_frames == 0:
-            nb_frames = self.stats['nb_frames'] - start_frame
-        _time = self.frame_to_time(start_frame,)
-        _duration = str(nb_frames/self.stats['rate'])
+        if scale != 1:
+            out_name += f"_{scale}"
 
-        # prepare subprocess command
-        _fcmd = [self.ffmpeg, '-i', self.file]
+        out_name += out_format
+        if out_folder is not None:
+            out_folder = osp.abspath(out_folder)
+            os.makedirs(out_folder, exist_ok=True)
+            out_name = osp.join(out_folder, out_name)
 
-        # if clip
-        if nb_frames < int(self.stats['nb_frames']):
-            _fcmd = _fcmd + ['-ss', _time, '-t', _duration]
-
-        #if scale
-        if scale < 1:
-            _scale = ['-s', '%dx%d'%(int(self.stats['width'] * scale), int(self.stats['height'] * scale))]
-            _fcmd = _fcmd + _scale
-            out_name = out_name + '_' + str(scale)
-
-        #if gif or webm
         if out_format == '.gif' or out_format == '.webm':
-            _fcmd = _fcmd + ['-bitrate', '3000k']
+            cmd = cmd + ['-bitrate', '3000k']
 
-        out_name = out_name + out_format
-        _fcmd = _fcmd + [out_name]  #, '-hide_banner'
-        _p = sp.Popen(_fcmd, stdin=sp.PIPE, stderr=sp.PIPE)
-        # for stdout_line in iter(_p.stdout.readline, ""):
-        #     yield stdout_line
-        # _p.stdout.close()
-        # _ret = _p.wait()
-        # if _ret:
-        #     raise sp.CalledProcessError(_ret, _fcmd)
-        return out_name
+        cmd.append(out_name)
+        print(" ".join(cmd))
+        sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE)
+
+        return osp.abspath(out_name)
+
 
     def fits_in_memory(self, nb_frames=None, dtype_size=1, with_grad=0, scale=1, stream=0,
                        memory_type="GPU", step=1):
@@ -385,7 +449,6 @@ class FF():
         proc.wait()
 
         return out
-
 
     def _to_numpy_proc(self, start, nb_frames, step, width, height, dtype, bufsize, proc):
         """ read nb_frames at step from open pipe

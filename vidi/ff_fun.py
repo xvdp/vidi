@@ -22,7 +22,7 @@ def ffprobe(src, entries=None, stream=0, verbose=False):
     full_stats = V.get_video_stats(stream=stream, entries=entries, verbose=verbose)
     return V.stats
 
-def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, noborder=True):
+def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, noborder=True, showframe=False, fontcolor="white"):
     """
     Args:
         src (str)
@@ -34,6 +34,7 @@ def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, nobo
         start: (number) if file sequences: start frame, if movie, start time
         fps:
         loop    (int[0]) : number of loops, 0: forever
+        showframe    (bool[False]): draw current frame
 
     Examples:
         >>> vidi.ffplay("metro%08d.png", start=9000) # patterned files local folder
@@ -42,16 +43,21 @@ def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, nobo
         >>> vidi.ffplay(""~/mypath") # files in folder - if only one extension type found
         >>> vidi.ffplay("~/metro_color.mov")
     """
+
+
     src = _format_src(src)
 
     fcmd = ["ffplay"]
 
+    # if we are playing a folder not a single file
     if '%' in src or '*' in src:
         if fps is None:
             fps = 29.97
         fcmd += ["-framerate", str(fps)]
-    elif fps is not None:
-        print("%sfps not supported for <%s>%s"%(Col.YB, src, Col.AU))
+    else:
+        if fps is not None:
+            print("%scustom fps not supported for <%s>%s"%(Col.YB, src, Col.AU))
+
 
     # file lists and folders
     fcmd += _ff_format_input_list(src, start)
@@ -65,6 +71,10 @@ def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, nobo
     # if alwaysontop: # not on ubuntu 18
     #     fcmd += ["-alwaysontop"]
     fcmd += ["-i", src]
+
+    if showframe:
+        _cmd = f"drawtext=fontfile=Arial.ttf: x=(w-tw)*0.98: y=h-(2*lh): fontcolor={fontcolor}: fontsize=h*0.0185: " + "text='%{n}'"
+        fcmd += ["-vf", _cmd]
 
     _ffplaymsg(fcmd, msg="Running ffplay on folder")
 
