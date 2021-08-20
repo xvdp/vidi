@@ -30,11 +30,12 @@ def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, nobo
             image%08.png
             movie.mov
 
-        folder (str), if None, plays current folder
-        start: (number) if file sequences: start frame, if movie, start time
-        fps:
-        loop    (int[0]) : number of loops, 0: forever
-        showframe    (bool[False]): draw current frame
+        folder      (str folder or file), if None, plays current folder
+        start       (number) if file sequences: start frame, if movie, start time
+        fps         (float [29.97]) if folder play at speed
+        loop        (int[0]) : number of loops, 0: forever
+        showframe   (bool[False]): draw current frame
+        fontcolor   (str [white])
 
     Examples:
         >>> vidi.ffplay("metro%08d.png", start=9000) # patterned files local folder

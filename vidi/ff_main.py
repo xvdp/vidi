@@ -116,40 +116,19 @@ class FF():
     def strftime(self, intime):
         return '%02d:%02d:%02d.%03d'%((intime//3600)%24, (intime//60)%60, intime%60, (int((intime - int(intime))*1000)))
 
-    def play(self,start=0, fps=None, loop=0, autoexit=True, fullscreen=False, noborder=True, showframe=False, fontcolor="white"):
+    def play(self, loop=0, autoexit=True, fullscreen=False, noborder=True, showframe=False, fontcolor="white"):
         """ff play video
 
         ffplay -i metro.mov
         ffplay -start_number 5486 -i metro%08d.png
+        Args
+            loop        (int[0]) : number of loops, 0: forever
+            autoexit    (bool [True]) close window on finish
+            fullscreen  (bool [False])
+            noborder    (bool[True])
+            showframe   (bool[False]): draw current frame number
+            fontcolor   (str [white])
 
-   fcmd = ["ffplay"]
-
-    # if we are playing a folder not a single file
-    if '%' in src or '*' in src:
-        if fps is None:
-            fps = 29.97
-        fcmd += ["-framerate", str(fps)]
-    else:
-        if fps is not None:
-            print("%scustom fps not supported for <%s>%s"%(Col.YB, src, Col.AU))
-
-
-    # file lists and folders
-    fcmd += _ff_format_input_list(src, start)
-    fcmd += ["-loop", str(loop)]
-    if autoexit:
-        fcmd += ["-autoexit"]
-    if noborder:
-        fcmd += ["-noborder"]
-    if fullscreen:
-        fcmd += ["-fs"]
-    # if alwaysontop: # not on ubuntu 18
-    #     fcmd += ["-alwaysontop"]
-    fcmd += ["-i", src]
-
-    if showframe:
-        _cmd = f"drawtext=fontfile=Arial.ttf: x=(w-tw)*0.98: y=h-(2*lh): fontcolor={fontcolor}: fontsize=h*0.0185: " + "text='%{n}'"
-        fcmd += ["-vf", _cmd]        
         """
         if not self.stats:
             self.get_video_stats(stream=0)
