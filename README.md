@@ -51,7 +51,11 @@ with vidi.FFcap('myvideo.mp4', size=(256,256)) as F:
 
 ## video to ndarray
 ```python
-out = vidi.ffread(<videofile>)
+out = vidi.ffread(<videofile>) <br>
+
+# alternate method, n frames
+f = vidi.FF(<videofile>)
+imgs = f.to_numpy(start=0, nb_frames=None, scale=1, stream=0, step=1, dtype=np.uint8, memory_type="CPU")
 ```
 
 ## export video clip

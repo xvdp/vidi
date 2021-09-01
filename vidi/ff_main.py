@@ -237,7 +237,7 @@ class FF():
         print(" ".join(_fcmd))
         sp.call(_fcmd)
 
-    def _export(self, start=0, nb_frames=None, scale=1, step=1, stream=0):
+    def _export(self, start=0, nb_frames=None, scale=1, step=1, stream=0, crop=None):
         """ common to clip and frame exports
         """
         if not self.stats:
@@ -272,9 +272,16 @@ class FF():
         if step > 1:
             cmd += ['-r', str(_rate // step), '-vf', 'mpdecimate,setpts=N/FRAME_RATE/TB']
 
+        if isinstance(crop, (list, tuple)) and len(crop) == 4:
+            _crop = f"crop={crop[0]}:{crop[1]}:{crop[2]}:{crop[3]}"
+            if step == 1:
+                cmd += ["-vf", _crop]
+            else:
+                cmd[-1] += ", "+_crop
+
         return cmd
 
-    def export_frames(self, out_name=None, start=0, nb_frames=None, scale=1, step=1, stream=0, out_folder=None):
+    def export_frames(self, out_name=None, start=0, nb_frames=None, scale=1, step=1, stream=0, out_folder=None, **kwargs):
         """ extract frames from video
         Args
             out_name    (str)   # if no format in name ".png
@@ -283,14 +290,23 @@ class FF():
             scale       (float [1]) rescale output
             stream      (int [0]) if more than one stream in video
             out_folder  optional, save to folder
+
+        kwargs
+            out_format  (str) in (".png", ".jpg", ".bmp") format override
+            crop        (list, tuple (w,h,x,y)
         """
-        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step, stream=stream)
+        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step, stream=stream, **kwargs)
 
         # resolve name
         if out_name is None:
             out_name = osp.splitext(self.file)[0]
 
+
         out_name, out_format = osp.splitext(out_name)
+
+        if "out_format" in kwargs:
+            out_format = kwargs["out_format"]
+
         if out_format.lower() not in (".png", ".jpg", ".jpeg", ".bmp"):
             out_format = ".png"
 
@@ -318,7 +334,7 @@ class FF():
 
         return osp.abspath(out_name)
 
-    def export_clip(self, out_name=None, start=0, nb_frames=None, scale=1, step=1, stream=0, out_folder=None):
+    def export_clip(self, out_name=None, start=0, nb_frames=None, scale=1, step=1, stream=0, out_folder=None, **kwargs):
         """ extract video clip
         Args:
             out_name    (str [None]) default is <input_name>_framein_frame_out<input_format>
@@ -326,17 +342,27 @@ class FF():
             nb_frames   (int [None]):      default: to end of clip
             scale       (float [1]) rescale output
             stream      (int [0]) if more than one stream in video
+        kwargs
+            out_format  (str) in (".mov", ".mp4") format override
+            crop        (list, tuple (w,h,x,y)
+        TODO: generate intermediate video with keyframes then cut
+        ffmpeg -i a.mp4 -force_key_frames 00:00:09,00:00:12 out.mp4
+
         """
-        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step, stream=stream)
+        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step, stream=stream, **kwargs)
 
         # resolve name
         if out_name is None:
+            if nb_frames is None:
+                nb_frames = self.stats["nb_frames"]
             out_name = osp.splitext(self.file)[0]+ '_' + str(start) + '-' + str(nb_frames+start)
 
         # format
         out_name, out_format = osp.splitext(out_name)
         if not out_format:
             out_format = osp.splitext(self.file)[1]
+        if "out_format" in kwargs:
+            out_format = kwargs["out_format"]
 
         if scale != 1:
             out_name += f"_{scale}"
