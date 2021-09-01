@@ -5,8 +5,9 @@ import subprocess as sp
 import platform
 import json
 import numpy as np
-from kotools import CPUse, GPUse, Col
+from kotools import CPUse, GPUse
 
+from .utils import Col
 from .io_main import IO
 
 class FF():
