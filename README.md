@@ -44,8 +44,9 @@ vidi.ffstitch("*.png", "mymovie.mov", size=(1000,200))
 
 ## ndarray to video
 ```python
-with vidi.FFcap('myvideo.mp4', size=(256,256)) as F:
+with vidi.FFcap('myvideo.mp4', size=(height, width), fps=30) as F:
     F.add_frame(ndarray)
+# ndarray of shape (height, widht, 3) or (nb_frames, height, width, 3)
 # only tested with filenames in .mp4, .avi, pix_fmt='rbg24' and 'gray'
 ```
 
@@ -56,6 +57,7 @@ out = vidi.ffread(<videofile>) <br>
 # alternate method, n frames
 f = vidi.FF(<videofile>)
 imgs = f.to_numpy(start=0, nb_frames=None, scale=1, stream=0, step=1, dtype=np.uint8, memory_type="CPU")
+# imgs of shape (nb_frames, height, width, channels)
 ```
 
 ## export video clip

@@ -129,12 +129,18 @@ class FFcap:
 
     def add_frame(self, frame):
         """ pix_fmt rgb24 requires uint8 RGB
+        Args
+            frame   ndarray uint8 RGB shape (height, shape, 3) or (nb_frames, height, shape, 3)
         """
         if self.debug:
             print('%sadd_frame() %d %s%s'%(Col.BB, self._framecount, str(frame.shape), Col.AU), end="\r")
-        assert frame.shape == self.shape, "attempting to input incorrect file size, <%s> instead of <%s>"%(str(frame.shape), str(self.shape))
-        self._pipe.stdin.write(frame.tobytes())
-        self._framecount += 1
+        assert frame.ndim in (3,4) and frame.shape[-3:] == self.shape, "attempting to input incorrect file size, <%s> instead of <%s>"%(str(frame.shape), str(self.shape))
+        if frame.ndim == 4:
+            for _frame in frame:
+                self.add_frame(_frame)
+        else:
+            self._pipe.stdin.write(frame.tobytes())
+            self._framecount += 1
 
     def from_screen(self):
         pass
