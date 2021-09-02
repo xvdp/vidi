@@ -5,15 +5,13 @@ import subprocess as sp
 import platform
 import json
 import numpy as np
-from kotools import CPUse, GPUse
 
-from .utils import Col
+
+from .utils import Col, CPUse, GPUse
 from .io_main import IO
 
 class FF():
     """wrapper class to ffmpeg, ffprobe, ffplay
-    #TODO inherit VIDI and IO
-
         Examples:
             >>> from vidi import FF
             >>> f = FF('MUCBCN.mp4')

@@ -1,19 +1,20 @@
 # VIDI
 =====
 
-unsupported ffmpeg wrapper to:
-* play video
+### WIP: ffmpeg wrapper tested only Ubuntu
+rewrite to simplify
+* plays video
 * stitch video from frames
-* stream from array to video 
+* stream from numpy to video 
 * convert video to numpy
 
-### this is wip, and untested personal converted - will remove notice if this changes
-
-requires
+requires ffmpeg
 ```bash
 sudo apt-get install ubuntu-restricted-extras
 sudo apt-get install libavcodec-dev libav-tools ffmpeg
 ```
+
+
 
 # Examples:
 
@@ -57,7 +58,7 @@ out = vidi.ffread(<videofile>) <br>
 # alternate method, n frames
 f = vidi.FF(<videofile>)
 imgs = f.to_numpy(start=0, nb_frames=None, scale=1, stream=0, step=1, dtype=np.uint8, memory_type="CPU")
-# imgs of shape (nb_frames, height, width, channels)
+# returns imgs of shape (nb_frames, height, width, channels)
 ```
 
 ## export video clip

@@ -1,10 +1,12 @@
+""" xvdp
+util functions for vidi
+tested only in Ubuntu
+"""
+import subprocess as sp
 import time
 import numpy as np
-with_torch = True
-try:
-    import torch
-except:
-    with_torch = False
+import psutil
+
 class Col:
     AU = '\033[0m'
     BB = '\033[94m\033[1m'
@@ -127,5 +129,55 @@ def validate_dtype(dtype, as_torch=False):
     else:
         assert "dtype <%s> not recognized"%dtype
     if as_torch:
+        import torch
         dtype = torch.__dict__[dtype]
     return dtype
+
+def get_smi(query):
+    _cmd = ['nvidia-smi', '--query-gpu=memory.%s'%query, '--format=csv,nounits,noheader']
+    return int(sp.check_output(_cmd, encoding='utf-8').split('\n')[0])
+
+class GPUse:
+    """thin wrap to nvidia-smi"""
+    def __init__(self, units="MB"):
+        self.total = get_smi("total")
+        self.used = get_smi("used")
+        self.available = self.total - self.used
+        self.percent = round(100*self.used/self.total, 1)
+        self.units = units if units[0].upper() in ('G', 'M') else 'MB'
+        self._fix_units()
+
+    def _fix_units(self):
+        if self.units[0].upper() == "G":
+            self.units = "GB"
+            self.total //= 2**10
+            self.used //= 2**10
+            self.available //= 2**10
+
+    def __repr__(self):
+        return "GPU: ({})".format(self.__dict__)
+
+class CPUse:
+    """thin wrap to psutil.virtual_memory to matching nvidia-smi syntax"""
+    def __init__(self, units="MB"):
+        cpu = psutil.virtual_memory()
+        self.total = cpu.total
+        self.used = cpu.used
+        self.available= cpu.available
+        self.percent = cpu.percent
+        self.units = units if units[0].upper() in ('G', 'M') else 'MB'
+        self._fix_units()
+
+    def _fix_units(self):
+        _scale = 20
+        if self.units[0].upper() == "G":
+            self.units = "GB"
+            _scale = 30
+        else:
+            self.units = "MB"
+        self.total //= 2**_scale
+        self.used //= 2**_scale
+        self.available //= 2**_scale
+
+    def __repr__(self):
+        return "CPU: ({})".format(self.__dict__)

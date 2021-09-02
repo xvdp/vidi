@@ -134,7 +134,9 @@ class FFcap:
         """
         if self.debug:
             print('%sadd_frame() %d %s%s'%(Col.BB, self._framecount, str(frame.shape), Col.AU), end="\r")
-        assert frame.ndim in (3,4) and frame.shape[-3:] == self.shape, "attempting to input incorrect file size, <%s> instead of <%s>"%(str(frame.shape), str(self.shape))
+
+        _msg = "incorrect frame size <%s>; requires: <%s>"
+        assert frame.ndim in (3,4) and frame.shape[-3:] == self.shape, _msg%(str(frame.shape), str(self.shape))
         if frame.ndim == 4:
             for _frame in frame:
                 self.add_frame(_frame)
