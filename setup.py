@@ -19,7 +19,7 @@ def setup_package():
         description='modules to access video',
         url='http://github.com/xvdp/vidi',
         author='xvdp',
-        author_email='xvdp@gmail.com',
+        author_email='xvdpahlen@gmail.com',
         packages=find_packages(),
         install_requires=['numpy>=1.15'],
         long_description=_readme(),

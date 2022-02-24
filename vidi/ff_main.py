@@ -539,4 +539,14 @@ ffmpeg -ss 00:00:20.000 -t 12.0 -i MUCBCN.mp4 -vf scale=iw/2:-1 output.mp4
 #half speed (audio doen not chnage speed)
 ffplay MUCBCN.mp4 -vf "setpts=2*PTS"
 
+
+# gif export
+ffmpeg -i INPUT -loop 10 -final_delay 500 out.gif
+    loop -1 none, 0 forever
+
+#https://ffmpeg.org/ffmpeg-formats.html
+
+#optimize gif export: generate palette / doesnt really work...
+ffmpeg -y -i INPUT -vf palettegen palette.png
+ffmpeg -y -i INPUT -i palette.png -filter_complex paletteuse OUT.gif
 """
