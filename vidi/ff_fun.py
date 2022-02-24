@@ -37,6 +37,8 @@ def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, nobo
         showframe   (bool[False]): draw current frame
         fontcolor   (str [white])
 
+        TODO: for f in *.mp4 ; do ffplay -autoexit "$f"; done
+
     Examples:
         >>> vidi.ffplay("metro%08d.png", start=9000) # patterned files local folder
         >>> vidi.ffplay("*.png")   # pngs local folder

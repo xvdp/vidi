@@ -10,23 +10,18 @@ def _readme():
 def set_version(version):
     with open('vidi/version.py', 'w') as _fi:
         _fi.write("version='"+version+"'")
-    return version
-
-def install_requires():
-    with open('requirements.txt') as _fo:
-        return _fo.read().split()
-
+ 
 def setup_package():
     ''' setup '''
     metadata = dict(
         name='vidi',
-        version=set_version(version='0.1'),
+        version=set_version(version='0.11'),
         description='modules to access video',
         url='http://github.com/xvdp/vidi',
         author='xvdp',
         author_email='xvdp@gmail.com',
         packages=find_packages(),
-        install_requires=['kotools@git+https://github.com/xvdp/kotools@main', 'numpy>=1.15'],
+        install_requires=['numpy>=1.15'],
         long_description=_readme(),
         zip_safe=False)
 

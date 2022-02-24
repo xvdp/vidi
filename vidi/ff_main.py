@@ -33,6 +33,8 @@ class FF():
         self.stats = {}
         self._io = IO()
         self.file = fname
+        if osp.isfile(fname):
+            self.get_video_stats()
 
     def _if_win(self):
         if platform.system() == 'Windows':
