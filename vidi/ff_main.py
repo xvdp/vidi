@@ -33,7 +33,7 @@ class FF():
         self.stats = {}
         self._io = IO()
         self.file = fname
-        if osp.isfile(fname):
+        if fname is not None and osp.isfile(fname):
             self.get_video_stats()
 
     def _if_win(self):
@@ -160,9 +160,9 @@ class FF():
         sp.call(_fcmd)
         #sp.Popen(_fcmd, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE)
 
-    def playfiles(self, fname=None, folder=".", max_frames=None):
+    def playfiles(self, fname=None, folder=".", max_frames=None, fmt=('.jpg', '.jpeg', '.png'),):
 
-        imgs, start = self._io.get_images(folder=folder, name=fname, fmt=('.jpg', '.jpeg', '.png'), max_imgs=max_frames)
+        imgs, start = self._io.get_images(folder=folder, name=fname, fmt=fmt, max_imgs=max_frames)
 
         print(self.ffplay)
         print(start)
