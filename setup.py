@@ -10,12 +10,13 @@ def _readme():
 def set_version(version):
     with open('vidi/version.py', 'w') as _fi:
         _fi.write("version='"+version+"'")
+        return version
  
 def setup_package():
     ''' setup '''
     metadata = dict(
         name='vidi',
-        version=set_version(version='0.11'),
+        version=set_version(version='0.12'),
         description='modules to access video',
         url='http://github.com/xvdp/vidi',
         author='xvdp',
