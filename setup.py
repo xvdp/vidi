@@ -1,22 +1,22 @@
 '''setup file for Vidi'''
-import sys
+
 from setuptools import setup, find_packages
 
 
 def _readme():
-    with open('README.md') as fo_:
+    with open('README.md', encoding='utf8') as fo_:
         return fo_.read()
 
-def set_version(version):
-    with open('vidi/version.py', 'w') as _fi:
+def _set_version(version):
+    with open('vidi/version.py', 'w', encoding='utf8') as _fi:
         _fi.write("version='"+version+"'")
         return version
- 
+
 def setup_package():
     ''' setup '''
     metadata = dict(
         name='vidi',
-        version=set_version(version='0.12'),
+        version=_set_version(version='0.14'),
         description='modules to access video',
         url='http://github.com/xvdp/vidi',
         author='xvdp',

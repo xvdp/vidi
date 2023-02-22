@@ -8,6 +8,7 @@ import numpy as np
 import psutil
 
 class Col:
+    """colorization shortucts"""
     AU = '\033[0m'
     BB = '\033[94m\033[1m'
     GB = '\033[92m\033[1m'
@@ -16,6 +17,8 @@ class Col:
     B = '\033[1m'
 
 class Timer:
+    """ simple timing class
+    """
     def __init__(self, name=None, live_tics=False):
         self.name = name
         self.live_tics = live_tics
@@ -34,9 +37,8 @@ class Timer:
                 name = name+"0"
             self.times[name] = self.now - self.last
             self.last = time.time()
-
             if self.live_tics and name is not None:
-                print(" Timer:(%s %s\t%s%.3f ms%s)"%(name, color, indent, self.times[name]*1000, Col.AU))
+                print(f" Time:({name} {color}\t{indent}{self.times[name]*1000,:.3} ms{Col.AU})")
 
     def subtic(self, name, color=Col.GB, indent="  "):
         """
@@ -46,18 +48,16 @@ class Timer:
         if name is not None:
             while name in self.times:
                 name = name+"0"
-            name = name
             self.times["subtic:"+name] = _now - self.last
 
             if self.live_tics and name is not None:
-                print(" Timer:(%s %s\t%s%.3f ms%s)"%(name, color, indent, self.times[name]*1000, Col.AU))
-
+                print(f" Time:({name} {color}\t{indent}{self.times[name]*1000:.3}ms{Col.AU})")
 
     def toc(self, name=None):
         self.tic(name)
 
         name = self.name if self.name is not None else ""
-        print("%sTimer: %s%s"%(Col.GB, name, Col.AU))
+        print(f"{Col.GB}Time: {name}{Col.AU}")
 
         # print tics
         _len = len(sorted(self.times, key=len)[-1])
@@ -73,16 +73,18 @@ class Timer:
                 indent = ""
 
             _name = _name + (_len - len(_name))*" "+ indent
-            print(" %s%s\t%.3f ms%s"%(_name, col, self.times[_t]*1000, Col.AU))
+            print(f" {_name}{col}\t{self.times[_t]*1000:.3} ms{Col.AU}")
 
         # print total
         self.times["total"] = self.now - self.start
         if self.times["total"] >= 60:
             _total = strftime(self.times["total"])
         else:
-            _total = "%.3f ms"%(self.times["total"]*1000)
+            _total = f"{(self.times['total']*1000):.3} ms"
+
         _name = "Total\t"+" "*max(0, _len-len("Total"))
-        print("%s%s\t%s%s"%(Col.YB, _name, _total, Col.AU))
+        print(f"{Col.YB}{_name}\t{_total}{ Col.AU}")
+
 
 def dprint(*msg, debug=False, **kwmsg):
     """debug print wrapper"""
@@ -111,8 +113,10 @@ def time_to_frame(intime, fps):
     frame = int(intime * fps)
     return frame
 
-def strftime(intime):
-    return '%02d:%02d:%02d.%03d'%((intime//3600)%24, (intime//60)%60, intime%60, (int((intime - int(intime))*1000)))
+def strftime(t):
+    """seconds to str"""
+    _t = int(t)
+    return f"{(_t//3600)%24:02d}:{(_t//60)%60:02d}:{_t%60:02d}.{(int((t - _t)*1000)):03d}"
 
 def tofloat32(uint8_value):
     return uint8_value/np.array(255, dtype=np.float32)
@@ -155,7 +159,7 @@ class GPUse:
             self.available //= 2**10
 
     def __repr__(self):
-        return "GPU: ({})".format(self.__dict__)
+        return f"GPU: ({self.__dict__})"
 
 class CPUse:
     """thin wrap to psutil.virtual_memory to matching nvidia-smi syntax"""
@@ -180,4 +184,4 @@ class CPUse:
         self.available //= 2**_scale
 
     def __repr__(self):
-        return "CPU: ({})".format(self.__dict__)
+        return f"CPU: ({self.__dict__})"

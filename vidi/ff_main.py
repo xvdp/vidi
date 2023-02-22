@@ -1,10 +1,13 @@
 """File to handle all ffmpeg requests"""
+from typing import Union, Optional
+import warnings
 import os
 import os.path as osp
 import subprocess as sp
 import platform
 import json
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 from .utils import Col, CPUse, GPUse
@@ -29,18 +32,11 @@ class FF():
         self.ffplay = 'ffplay'
         self.ffmpeg = 'ffmpeg'
         self.ffprobe = 'ffprobe'
-        self._if_win()
         self.stats = {}
         self._io = IO()
         self.file = fname
         if fname is not None and osp.isfile(fname):
             self.get_video_stats()
-
-    def _if_win(self):
-        if platform.system() == 'Windows':
-            self.ffplay = 'ffplay.exe'
-            self.ffmpeg = 'ffmpeg.exe'
-            self.ffprobe = 'ffprobe.exe'
 
     def get_video_stats(self, stream=0, entries=None, verbose=False):
         """file statistics
@@ -54,7 +50,7 @@ class FF():
         if not osp.isfile(self.file):
             print(f"{self.file} not a valid file")
 
-        _cmd = f"{self.ffprobe} -v quiet -print_format json -show_format -show_streams {self.file}"
+        _cmd = f"ffprobe -v quiet -print_format json -show_format -show_streams {self.file}"
         with os.popen(_cmd) as _fi:
             stats = json.loads(_fi.read())
 
@@ -71,23 +67,45 @@ class FF():
 
         # subset video stream
         _stats = videos[stream]
-        if 'tags' in _stats and 'rotate' in _stats['tags'] and abs(eval(_stats['tags']['rotate'])) == 90:
-            self.stats['width'] = _stats['height']
-            self.stats['height'] = _stats['width']
-        else:
+
+        self.stats = {'type': 'video', 'file': self.file}
+
+        if 'width' in _stats and 'height'in _stats:
             self.stats['width'] = _stats['width']
             self.stats['height'] = _stats['height']
-        if 'r_frame_rate' in _stats:
-            self.stats['rate'] = eval(_stats['r_frame_rate'])
-        elif 'avg_frame_rate' in _stats:
-            self.stats['rate'] = eval(_stats['avg_frame_rate'])
 
-        self.stats['nb_frames'] = eval(_stats['nb_frames'])
-        self.stats['type'] = 'video'
-        self.stats['pad'] = "%%0%dd" %len(str(self.stats['nb_frames']))
+            _rotated = ('tags' in _stats and 'rotate' in _stats['tags'] and
+                        abs(eval(_stats['tags']['rotate'])) == 90)
+            if _rotated:
+                self.stats['width'] = _stats['height']
+                self.stats['height'] = _stats['width']
+        else:
+            warnings.warn("'width' or 'height' not found in stats setting to 1080p or fix code") 
+            self.stats['width'] = 1920
+            self.stats['height'] = 1080
 
-        self.stats['file'] = self.file
-        self.stats['pix_fmt'] = _stats['pix_fmt']
+        _frame_rate_keys = [k for k in _stats if 'frame_rate' in k]
+        if _frame_rate_keys:
+            self.stats['rate'] = eval(_stats[_frame_rate_keys[0]])
+        else:
+            self.stats['rate'] = 30.0
+            warnings.warn('no frame rate stats were found for stream, defaulting to 30 or fix code')
+
+        if 'nb_frames' in _stats:
+            self.stats['nb_frames'] = eval(_stats['nb_frames'])
+        elif 'tags' in _stats and 'DURATION' in _stats['tags'] and 'rate' in self.stats:
+            duration = _stats['tags']['DURATION']
+            seconds = sum(x * float(t) for x, t in zip([3600, 60, 1], duration.split(":")))
+            self.stats['nb_frames'] = round(seconds * self.stats['rate'])
+        else:
+            warnings.warn("'nb_frames' not found in stats, set manually or fix code") 
+        _pad = 6
+        if 'nb_frames' in self.stats:
+            _pad = int(np.ceil(np.log10(self.stats['nb_frames'])))
+        self.stats['pad'] = f"%0{_pad}d"
+
+        if 'pix_fmt' in _stats:
+            self.stats['pix_fmt'] = _stats['pix_fmt']
 
         if entries is not None:
             entries = [key for key in entries if key in _stats and key not in self.stats]
@@ -98,10 +116,25 @@ class FF():
             print(_cmd)
             print(f"{len(audios)} audio streams, {len(videos)} video streams")
             print(f"\nStats for video stream: {stream}")
-            print(self.stats)
-            print(f"\nFull stats")
+            print(json.dumps(self.stats, indent=2))
+            print("\nFull stats")
             print(json.dumps(stats, indent=2))
         return stats
+
+    def make_subtitle(self):
+        """ 
+        """
+        name = f"{osp.splitext(osp.abspath(self.file))[0]}_frames.srt"
+        sub = ""
+        last_frame = self.frame_to_time(0)
+        for i in range(self.stats['nb_frames']):
+            next_frame = self.frame_to_time(i+1)
+            sub += f"{i+1}\n{last_frame} --> {next_frame}\n\t{i+1}\t{last_frame}\n\n"
+            last_frame = next_frame
+
+        with open(name, 'w', encoding='utf8') as _fi:
+            _fi.write(sub)
+
 
     def frame_to_time(self, frame=0):
         """convert frame number to time"""
@@ -238,8 +271,17 @@ class FF():
         print(" ".join(_fcmd))
         sp.call(_fcmd)
 
-    def _export(self, start=0, nb_frames=None, scale=1, step=1, stream=0, crop=None):
+    def _export(self,
+                start: Union[int, float] = 0,
+                nb_frames: Optional[int] = None,
+                scale: float = 1.,
+                step: int = 1,
+                stream: int = 0,
+                crop: Union[list, tuple, None] = None) -> str:
         """ common to clip and frame exports
+        Args
+            start   (int, float) # float is interpreted as time, int as frame
+            nb_frames   
         """
         if not self.stats:
             self.get_video_stats(stream=stream)
@@ -268,7 +310,7 @@ class FF():
 
         # resize
         if scale != 1:
-            cmd += ['-s', '%dx%d'%(int(_width * scale), int(_height * scale))]
+            cmd += ['-s', f"{int(_width*scale)}x{int(_height*scale)}" ]
 
         if step > 1:
             cmd += ['-r', str(_rate // step), '-vf', 'mpdecimate,setpts=N/FRAME_RATE/TB']
@@ -282,11 +324,19 @@ class FF():
 
         return cmd
 
-    def export_frames(self, out_name=None, start=0, nb_frames=None, scale=1, step=1, stream=0, out_folder=None, **kwargs):
+    def export_frames(self,
+                      out_name: Optional[str] = None,
+                      start: Union[int, float] = 0,
+                      nb_frames: Optional[int] = None,
+                      scale: float = 1.,
+                      step: int = 1,
+                      stream: int = 0,
+                      out_folder=None,
+                      **kwargs) -> str:
         """ extract frames from video
         Args
             out_name    (str)   # if no format in name ".png
-            start       (int|float [0])       default: start of input clip, if float, start is a time
+            start       (int|float [0])  float: time in seconds, int: frame number
             nb_frames   (int [None]):   default: to end of clip
             scale       (float [1]) rescale output
             stream      (int [0]) if more than one stream in video
@@ -296,7 +346,8 @@ class FF():
             out_format  (str) in (".png", ".jpg", ".bmp") format override
             crop        (list, tuple (w,h,x,y)
         """
-        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step, stream=stream, **kwargs)
+        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step,
+                           stream=stream, crop=kwargs.get('crop', None))
 
         # resolve name
         if out_name is None:
@@ -333,6 +384,10 @@ class FF():
         print(" ".join(cmd))
         sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE)
 
+        with open(out_name+".txt", 'w', encoding="utf8") as _fi:
+            _fi.write(" ".join(cmd) +"\n")
+
+
         return osp.abspath(out_name)
 
     def export_clip(self, out_name=None, start=0, nb_frames=None, scale=1, step=1, stream=0, out_folder=None, **kwargs):
@@ -350,7 +405,8 @@ class FF():
         ffmpeg -i a.mp4 -force_key_frames 00:00:09,00:00:12 out.mp4
 
         """
-        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step, stream=stream, **kwargs)
+        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step,
+                           stream=stream, crop=kwargs.get('crop', None))
 
         # resolve name
         if out_name is None:
@@ -392,7 +448,8 @@ class FF():
         if not self.stats:
             self.get_video_stats(stream=stream)
 
-        nb_frames = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'], nb_frames)
+        nb_frames = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'],
+                                                                          nb_frames)
 
         width = self.stats['width'] * scale
         height = self.stats['height'] * scale
@@ -407,12 +464,66 @@ class FF():
             nb_frames = max_frames
         return nb_frames
 
-    def to_numpy(self, start=0, nb_frames=None, scale=1, stream=0, step=1, dtype=np.uint8, memory_type="CPU"):
+    def view_frame(self,
+                   start: Union[int, float],
+                   stream: int = 0,
+                   **kwargs) -> None:
+        """ open stream export frame to numpy, display with matplotlib
+
+        Args:
+            start       (int|float [0])  float: time in seconds, int: frame number
+        """
+        frame = self.to_numpy(start, nb_frames=1, stream=stream)
+
+        plt.figure(figsize=kwargs.get('figsize', (15, 15*self.stats['height']/self.stats['width'])))
+        if 'title' in kwargs:
+            plt.title(kwargs['title'])
+        plt.imshow(frame[0])
+        if 'axis' in kwargs:
+            plt.axis(kwargs['axis'])
+        plt.show()
+
+    # TODO: flawed - fix
+    # def view_frames(self,
+    #                start: Union[int, float],
+    #                nb_frames: int = 10,
+    #                step: int = 1,
+    #                stream: int = 0,
+    #                scale: float = 0.5,
+    #                **kwargs) -> None:
+    #     """ plot grid of frames
+    #     """
+    #     frames = self.to_numpy(start, nb_frames=nb_frames, step=step, scale=scale, stream=stream)
+    #     cols = kwargs.get('cols', min(5, nb_frames))
+    #     rows = kwargs.get('rows', np.ceil(nb_frames/cols))
+
+    #     width = rows*self.stats['height']*20/cols*self.stats['width']
+    #     plt.figure(figsize=kwargs.get('figsize', (20, width)))
+    #     if 'title' in kwargs:
+    #         plt.title(kwargs['title'])
+    #     for i in rows:
+    #         for j in cols:
+    #             plt.subplot(rows, cols, 1+j+cols*i)
+    #             plt.imshow(frames[i])
+    #             if 'axis' in kwargs:
+    #                 plt.axis(kwargs['axis'])
+    #     plt.tight_layout()
+    #     plt.show()
+
+
+    def to_numpy(self,
+                 start: Union[int, float] = 0,
+                 nb_frames: Optional[int] = None,
+                 scale: float = 1.,
+                 stream: int = 0,
+                 step: int = 1,
+                 dtype: np.dtype = np.uint8,
+                 memory_type: str = "CPU") -> np.ndarray:
         """
         read video to numpy
         Args
-            start   (int [0]) start frame
-            nb_frames   (int [None])
+            start       (int|float [0])  float: time in seconds, int: frame number
+            nb_frames   (int [None]) None: all frames
             scale       (float [1])
             stream      (int [0]) video stream to load
             step        (int [1]) step thru video
@@ -423,13 +534,13 @@ class FF():
         """
         if not self.stats:
             self.get_video_stats(stream=stream)
-        nb_frames = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'], nb_frames + start)
 
         if isinstance(start, float):
             _time = self.strftime(start)
             start = self.time_to_frame(start)
         else:
             _time = self.frame_to_time(start)
+
 
         _fcmd = [self.ffmpeg, '-i', self.file, '-ss', _time, '-start_number', str(start),
                  '-f', 'rawvideo', '-pix_fmt', 'rgb24']
@@ -439,7 +550,7 @@ class FF():
         if scale != 1:
             width = int(self.stats['width'] * scale)
             height = int(self.stats['height'] * scale)
-            _scale = ['-s', '%dx%d'%(width, height)]
+            _scale = ['-s', f'{width}x{height}']
             _fcmd = _fcmd + _scale
         _fcmd += ['pipe:']
 
@@ -448,33 +559,46 @@ class FF():
         nb_frames = self.fits_in_memory(nb_frames, dtype_size=np.dtype(dtype).itemsize, scale=scale,
                                         stream=stream, memory_type=memory_type, step=step)
 
+        to_frame = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'],
+                                                                          nb_frames + start)
+
         proc = sp.Popen(_fcmd, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, bufsize=bufsize)
-        out = self._to_numpy_proc(start, nb_frames, step, width, height, dtype, bufsize, proc)
+        out = self._to_numpy_proc(start, to_frame, step, width, height, dtype, bufsize, proc)
 
         proc.stdout.close()
         proc.wait()
 
         return out
 
-    def _to_numpy_proc(self, start, nb_frames, step, width, height, dtype, bufsize, proc):
-        """ read nb_frames at step from open pipe
+    def _to_numpy_proc(self,
+                       start: int,
+                       to_frame: int,
+                       step: int,
+                       width: int,
+                       height: int,
+                       dtype: np.dtype,
+                       bufsize: int,
+                       proc: sp.Popen) -> np.ndarray:
+        """ read nb_frames at step from open pipe return ndarray [N,H,W,C] 
         """
         out = []
-        for i in range(start, nb_frames):
+        for i in range(start, to_frame):
             if not i%step:
                 buffer = proc.stdout.read(bufsize)
                 if len(buffer) != bufsize:
                     break
-                out += [np.frombuffer(buffer, dtype=np.uint8).reshape(height, width, 3).astype(dtype)]
-        out = np.stack(out, axis=0)
+                frame = np.frombuffer(buffer, dtype=np.uint8)
+                out += [frame.reshape(height, width, 3).astype(dtype)]
 
-        # TODO: this assumes that video input is uint8 but thats not a given - must validate pixel format
+        out = out[0][None] if len(out) == 1 else np.stack(out, axis=0)
+
+        # TODO: this assumes that video input is uint8 but thats not a given: validate pixel format
         if dtype in (np.float32, np.float64):
             out /= 255.
         del buffer
 
         return out
-    
+
         # def stream(stream_spec, cmd='ffmpeg', capture_stderr=False, input=None, quiet=False, overwrite_output=False):
 #     args = compile(stream_spec, cmd, overwrite_output=overwrite_output)
 

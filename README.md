@@ -1,7 +1,8 @@
 # VIDI
 =====
 
-### WIP: ffmpeg wrapper tested only Ubuntu
+### WIP: ffmpeg wrapper used on Ubuntu only
+### Not sufficiently robust, untested
 rewrite to simplify
 * plays video
 * stitch video from frames
@@ -10,9 +11,15 @@ rewrite to simplify
 
 requires ffmpeg
 ```bash
-sudo apt-get install ubuntu-restricted-extras
-sudo apt-get install libavcodec-dev libav-tools ffmpeg
+conda install ffmpeg
 ```
+depending on the verstion there can be a mismatch in libraries leading to error
+
+`ffprobe: error while loading shared libraries: libopenh264.so.5: cannot open shared object file: No such file or directory`
+
+That error can be fixed by creating a symlink from an existing `libopenh264.so`, e.g.
+
+`ln -s libopenh264.so libopenh264.so.5`
 
 
 
@@ -60,6 +67,11 @@ f = vidi.FF(<videofile>)
 imgs = f.to_numpy(start=0, nb_frames=None, scale=1, stream=0, step=1, dtype=np.uint8, memory_type="CPU")
 # returns imgs of shape (nb_frames, height, width, channels)
 ```
+## show frame with matplotlib
+```python
+f = vidi.FF(<videofile>)
+f.view_frame(<time in sec. | framenumber>)
+```
 
 ## export video clip
 ```python
@@ -70,10 +82,16 @@ f.export_clip(out_name="myclip.mp4", num_frames=4, scale=0.5)
 ## export video frames
 ```python
 f = vidi.FF(<videofile>)
-f.export_frames(out_name="myclip_%06d.png", num_frames=4, scale=0.5)
+f.export_frames(out_name="myclip_%06d.png", start=0, nb_frames=4, scale=0.5, step=1, stream=0, out_folder=None)
 ```
 
 ## video information
 ```python
 stats = vidi.ffprobe(<videofile>, verbose=False, entries=None)
+```
+
+## export frame and time to .srt subtitle file
+```python
+f = vidi.FF(<videofile>)
+f.make_subtitles()
 ```
