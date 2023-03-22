@@ -42,18 +42,18 @@ class IO:
             assert '%' in name, "template name not recognized expected format name%08d.png"
             if not osp.isdir(osp.split(name)[0]):
                 name = osp.join(folder, name)
-            
+
             name_root = osp.basename(name.split("%")[0])
             fmt = osp.splitext(name)[1]
             #print(name_root, fmt, name)
             first_file = sorted([f for f in os.listdir(folder) if osp.splitext(f)[1].lower() in fmt and name_root in f])[0]
 
             start_frame = int(osp.splitext(first_file.split(name_root)[1])[0])
-            
+    
         else:
             print("name must be None, template string or list, found ", type(name))
             name = False
-        
+
         return name, start_frame
 
 

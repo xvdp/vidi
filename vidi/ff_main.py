@@ -38,6 +38,7 @@ class FF():
         if fname is not None and osp.isfile(fname):
             self.get_video_stats()
 
+
     def get_video_stats(self, stream=0, entries=None, verbose=False):
         """file statistics
             returns full stats, stores subset to self.stats
@@ -121,8 +122,11 @@ class FF():
             print(json.dumps(stats, indent=2))
         return stats
 
+
     def make_subtitle(self):
-        """ 
+        """ Make a subtitle file to show frame number and frame time with VLC or other video players
+        as standalone gist https://gist.github.com/xvdp/ec64daaa6fa381d8ba02342801a51b37
+        possbly TODO: embed as subtitle track - https://www.baeldung.com/linux/subtitles-ffmpeg
         """
         name = f"{osp.splitext(osp.abspath(self.file))[0]}_frames.srt"
         sub = ""
@@ -143,12 +147,15 @@ class FF():
         outtime = frame/self.stats['rate']
         return self.strftime(outtime)
 
+
     def time_to_frame(self, intime):
         frame = int(intime * self.stats['rate'])
         return frame
 
+
     def strftime(self, intime):
         return '%02d:%02d:%02d.%03d'%((intime//3600)%24, (intime//60)%60, intime%60, (int((intime - int(intime))*1000)))
+
 
     def play(self, loop=0, autoexit=True, fullscreen=False, noborder=True, showframe=False, fontcolor="white"):
         """ff play video
@@ -177,7 +184,7 @@ class FF():
         _fcmd += ['-i', self.file ]
         if showframe:
             _cmd = f"drawtext=fontfile=Arial.ttf: x=(w-tw)*0.98: y=h-(2*lh): fontcolor={fontcolor}: fontsize=h*0.0185: " + "text='%{n}'"
-            _fcmd += ["-vf", _cmd]   
+            _fcmd += ["-vf", _cmd]
 
         print(" ".join(_fcmd))
         print("-------Interaction--------")
@@ -192,6 +199,7 @@ class FF():
 
         sp.call(_fcmd)
         #sp.Popen(_fcmd, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE)
+
 
     def playfiles(self, fname=None, folder=".", max_frames=None, fmt=('.jpg', '.jpeg', '.png'),):
 
@@ -223,6 +231,7 @@ class FF():
 
         return True
 
+
     def get_size(self, size=None):
         if size is not None:
             if isinstance(size, str):
@@ -234,6 +243,7 @@ class FF():
             if isinstance(size, (tuple, list)):
                 size = "%dx%d"%size
         return size
+
 
     def stitch(self, dst, src, audio, fps, size, start_img, max_img, pix_fmt="yuv420p"):
         """
@@ -270,6 +280,7 @@ class FF():
 
         print(" ".join(_fcmd))
         sp.call(_fcmd)
+
 
     def _export(self,
                 start: Union[int, float] = 0,
@@ -323,6 +334,7 @@ class FF():
                 cmd[-1] += ", "+_crop
 
         return cmd
+
 
     def export_frames(self,
                       out_name: Optional[str] = None,
@@ -389,6 +401,7 @@ class FF():
 
 
         return osp.abspath(out_name)
+
 
     def export_clip(self, out_name=None, start=0, nb_frames=None, scale=1, step=1, stream=0, out_folder=None, **kwargs):
         """ extract video clip
@@ -463,6 +476,7 @@ class FF():
             print(_msg)
             nb_frames = max_frames
         return nb_frames
+
 
     def view_frame(self,
                    start: Union[int, float],
@@ -569,6 +583,7 @@ class FF():
         proc.wait()
 
         return out
+
 
     def _to_numpy_proc(self,
                        start: int,
