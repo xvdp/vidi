@@ -25,9 +25,8 @@ class FF():
             # output images
             >>> e = f.get_frames(out_format='.png', start=100, nb_frames=5, scale=0.6)
             >>> f.play(c)
-
     """
-    def __init__(self, fname=None):
+    def __init__(self, fname: Optional[str] = None) -> None:
 
         self.ffplay = 'ffplay'
         self.ffmpeg = 'ffmpeg'
@@ -39,7 +38,10 @@ class FF():
             self.get_video_stats()
 
 
-    def get_video_stats(self, stream=0, entries=None, verbose=False):
+    def get_video_stats(self,
+                        stream: int = 0,
+                        entries: Optional[tuple] = None,
+                        verbose: bool = False) -> dict:
         """file statistics
             returns full stats, stores subset to self.stats
             if video stream has rotation, rotates width and height in subset
@@ -130,34 +132,104 @@ class FF():
         """
         name = f"{osp.splitext(osp.abspath(self.file))[0]}_frames.srt"
         sub = ""
-        last_frame = self.frame_to_time(0)
+        last_frame = self.frame_to_strftime(0)
         for i in range(self.stats['nb_frames']):
-            next_frame = self.frame_to_time(i+1)
+            next_frame = self.frame_to_strftime(i+1)
             sub += f"{i+1}\n{last_frame} --> {next_frame}\n\t{i+1}\t{last_frame}\n\n"
             last_frame = next_frame
 
         with open(name, 'w', encoding='utf8') as _fi:
             _fi.write(sub)
 
-
-    def frame_to_time(self, frame=0):
-        """convert frame number to time"""
+    def frame_to_time(self, frame: int = 0) -> float:
+        """convert frame to time seconds
+        Args
+            frame   int
+        """
         if not self.stats:
             self.get_video_stats(stream=0)
-        outtime = frame/self.stats['rate']
-        return self.strftime(outtime)
+        return frame/self.stats['rate']
+
+    def frame_to_strftime(self, frame: int = 0) -> str:
+        """convert frame to time str HH:MM:SS.mmm
+        Args
+            frame   int
+        """
+        return self.strftime(self.frame_to_time(frame))
 
 
-    def time_to_frame(self, intime):
+    def time_to_frame(self, intime: float) -> int:
+        """ return frame number for time in seconds
+        Args
+            intime  float
+        """
         frame = int(intime * self.stats['rate'])
         return frame
 
 
-    def strftime(self, intime):
-        return '%02d:%02d:%02d.%03d'%((intime//3600)%24, (intime//60)%60, intime%60, (int((intime - int(intime))*1000)))
+    @staticmethod
+    def strftime(intime: float) -> str:
+        """ time in seconds to HH:MM:SS.mmm
+        Args
+            intime  float
+        """
+        return '%02d:%02d:%02d.%03d'%((intime//3600)%24, (intime//60)%60, intime%60,
+                                      (int((intime - int(intime))*1000)))
+    @staticmethod
+    def strftime_to_time(instftime: str) -> float:
+        """ HH:MM:SS.mmm - > seconds
+        """
+        return sum(x * float(t) for x, t in zip([3600, 60, 1], instftime.split(":")))
 
 
-    def play(self, loop=0, autoexit=True, fullscreen=False, noborder=True, showframe=False, fontcolor="white"):
+    def build_filter_graph(self,
+                           scale: float = 1.,
+                           step: int = 1,
+                           rate: Optional[float] = None, 
+                           crop: Optional[tuple[int,int,int,int]] = None,
+                           subtitles: Optional[str] = None,
+                           showframe: bool = False,
+                           start_frame: int = 0,
+                           **kwargs) -> list:
+        """ add filter graph to command"""
+        out = []
+        _vf = []
+
+        # deprectated
+        if scale != 1:
+            _vf += [f"scale={int(self.stats['width']*scale)}:{int(self.stats['height']*scale)}"]
+            print(_vf)
+
+        if rate is not None:
+            _vf += [f"fps={rate}"]
+
+        if showframe:
+            _snum="" if start_frame == 0 else f"start_number={start_frame}:"
+            _vf += ["drawtext=x=w*0.01:y=h-2*th:fontcolor=white:fontsize=h*0.0185:"+
+                    _snum+"text='%{n}'"]
+        if subtitles is not None:
+            if not osp.isfile(subtitles):
+                _sub = subtitles
+                subtitles = osp.join(osp.abspath(self.file).dirname, subtitles)
+            assert osp.isfile(subtitles), f"subtitle_file not found <{_sub}>"
+            _vf += [f'subtitles={subtitles}']
+        if crop is not None:
+            assert isinstance(crop, (list, tuple)) and len(crop) == 4, f"crop:(w,h,x,y) got {crop}"
+            _vf += [f"crop={crop[0]}:{crop[1]}:{crop[2]}:{crop[3]}"]
+
+        if _vf:
+            out += ["-vf", ",".join(_vf)]
+        return out
+
+
+    def play(self,
+             loop: int = 0,
+             autoexit: bool = True,
+             fullscreen: bool = False,
+             noborder: bool = True,
+             start: Union[int, float] = 0,
+             nb_frames: Optional[int] = None,
+             **kwargs)-> None:
         """ff play video
 
         ffplay -i metro.mov
@@ -167,9 +239,16 @@ class FF():
             autoexit    (bool [True]) close window on finish
             fullscreen  (bool [False])
             noborder    (bool[True])
-            showframe   (bool[False]): draw current frame number
-            fontcolor   (str [white])
+            start       (int, float [0])
+            nb_frames   (int [None])
 
+        ** kwargs filter graph
+            scale: float = 1.,
+            step: int = 1, 
+            rate: Optional[float] = None, 
+            crop: Optional[tuple[int,int,int,int]] = None,
+            subtitles: Optional[str] = None,
+            showframe: bool = False,,
         """
         if not self.stats:
             self.get_video_stats(stream=0)
@@ -182,9 +261,43 @@ class FF():
         if fullscreen:
             _fcmd += ["-fs"]
         _fcmd += ['-i', self.file ]
-        if showframe:
-            _cmd = f"drawtext=fontfile=Arial.ttf: x=(w-tw)*0.98: y=h-(2*lh): fontcolor={fontcolor}: fontsize=h*0.0185: " + "text='%{n}'"
-            _fcmd += ["-vf", _cmd]
+
+        _interval, start_frame = self.format_start_end(start, nb_frames)
+        _fcmd += _interval
+
+        _fcmd += self.build_filter_graph(start_frame=start_frame, **kwargs)
+
+
+        # build filter graph
+        # _vf = []
+
+        # if scale != 1:
+        #     _fcmd += ['-s', f"{int(self.stats['width']*scale)}x{int(self.stats['height']*scale)}" ]
+        # _rate = rate or self.stats['rate']
+        # _vf = []
+        # if step > 1:
+        #     _rate = rate // step
+        #     _vf += ['mpdecimate,setpts=N/FRAME_RATE/TB']
+
+        # if rate is not None or step > 1:
+        #     _fcmd += ['-r', f"{_rate}"]
+
+        # if showframe:
+        #     _snum="" if start_frame == 0 else f"start_number={start_frame}:"
+        #     _vf += [f"drawtext=x=w*0.01:y=h-2*th:fontcolor=white:fontsize=h*0.0185:"+
+        #             _snum+"text='%{n}'"]
+        # if subtitles is not None:
+        #     if not osp.isfile(subtitles):
+        #         _sub = subtitles
+        #         subtitles = osp.join(osp.abspath(self.file).dirname, subtitles)
+        #     assert osp.isfile(subtitles), f"subtitle_file not found <{_sub}>"
+        #     _vf += [f'subtitles={subtitles}']
+        # if crop is not None:
+        #     assert isinstance(crop, (list, tuple)) and len(crop) == 4, f"crop:(w,h,x,y) got {crop}"
+        #     _vf += [f"crop={crop[0]}:{crop[1]}:{crop[2]}:{crop[3]}"]
+
+        # if _vf:
+        #     _fcmd += ["-vf", ",".join(_vf)]
 
         print(" ".join(_fcmd))
         print("-------Interaction--------")
@@ -230,7 +343,6 @@ class FF():
         sp.call(_fcmd)
 
         return True
-
 
     def get_size(self, size=None):
         if size is not None:
@@ -283,57 +395,54 @@ class FF():
 
 
     def _export(self,
-                start: Union[int, float] = 0,
+                start: Union[int, float, str] = 0,
                 nb_frames: Optional[int] = None,
-                scale: float = 1.,
-                step: int = 1,
                 stream: int = 0,
-                crop: Union[list, tuple, None] = None) -> str:
-        """ common to clip and frame exports
+                **kwargs) -> tuple[str, int]:
+        """ returns export command stub and start_frame
         Args
-            start   (int, float) # float is interpreted as time, int as frame
+            start   (int, float str) # float is interpreted as time, int as frame
             nb_frames   
         """
         if not self.stats:
             self.get_video_stats(stream=stream)
-        _rate = self.stats['rate']
-        _height = self.stats['height']
-        _width = self.stats['width']
 
-        # range start, frame and time
-        if isinstance(start, float):
-            time_start = self.strftime(start)
-            start = self.time_to_frame(start)
-        else:
-            time_start = self.frame_to_time(start)
+        _interval, start_frame = self.format_start_end(start, nb_frames)
 
-        # range size, number  and time
-        _max_frames = self.stats['nb_frames'] - start
-        if nb_frames is None:
-            nb_frames = _max_frames
-        else:
-            nb_frames = min(_max_frames, nb_frames)
-        time_end = str(nb_frames/_rate)
+        cmd =  [self.ffmpeg, '-i', self.file] + _interval
 
-        # export command
-        # '-vframes', str(nb_frames)]
-        cmd =  [self.ffmpeg, '-i', self.file, '-ss', time_start, '-t', time_end]
+        cmd += self.build_filter_graph(start_frame=start_frame, **kwargs)
 
-        # resize
-        if scale != 1:
-            cmd += ['-s', f"{int(_width*scale)}x{int(_height*scale)}" ]
+        return cmd, start_frame
 
-        if step > 1:
-            cmd += ['-r', str(_rate // step), '-vf', 'mpdecimate,setpts=N/FRAME_RATE/TB']
+    def format_start_end(self,
+                         start: Union[int, float, str] = 0,
+                         nb_frames: Optional[int] = None,) -> tuple[list, int]:
+        """ if start > 0 or nb_frames  != None: [--ss seconds -t seconds]
+    
+        could also use  '-vframes', str(nb_frames)]
+        Args
+            start       (int, float, str) # float is interpreted as time, int as frame
+            nb_frames   (int)  
+        """
+        out = []
+        if start or nb_frames is not None:
+            if isinstance(start, str):
+                start = self.strftime_to_time(start)
 
-        if isinstance(crop, (list, tuple)) and len(crop) == 4:
-            _crop = f"crop={crop[0]}:{crop[1]}:{crop[2]}:{crop[3]}"
-            if step == 1:
-                cmd += ["-vf", _crop]
-            else:
-                cmd[-1] += ", "+_crop
+            if isinstance(start, float):
+                start_time = start
+                start_frame = self.time_to_frame(start)
+                print(f"time: {start}, start frame: {start_frame}")
+            else: # int
+                start_frame = start
+                print(f"frame {start}")
+                start_time = self.frame_to_time(start)
 
-        return cmd
+            _max = self.stats['nb_frames'] - start
+            nb_frames = _max if nb_frames is None else min(_max, nb_frames)
+            out = ['-ss', f"{start_time}", '-t', str(nb_frames/self.stats['rate'])]
+        return out, start_frame
 
 
     def export_frames(self,
@@ -343,9 +452,15 @@ class FF():
                       scale: float = 1.,
                       step: int = 1,
                       stream: int = 0,
-                      out_folder=None,
+                      out_folder: str = None,
                       **kwargs) -> str:
         """ extract frames from video
+        TODO fix ffmpeg imprecision -ss TIMESTAMP starts at closest Iframe NOT exact time
+        # show Iframes
+        $ ffprobe -select_streams v -show_frames -show_entries frame=pict_type -of csv $VIDNAME | grep -n I
+        # play vid at time # time doesnt match subtitles
+        $ ffplay -i $VIDNAME -ss 00:01:43.666 -t 10 -vf subtitles=$SUBTITLENAME #.srt
+
         Args
             out_name    (str)   # if no format in name ".png
             start       (int|float [0])  float: time in seconds, int: frame number
@@ -358,13 +473,12 @@ class FF():
             out_format  (str) in (".png", ".jpg", ".bmp") format override
             crop        (list, tuple (w,h,x,y)
         """
-        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step,
+        cmd, start_frame = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step,
                            stream=stream, crop=kwargs.get('crop', None))
 
         # resolve name
         if out_name is None:
             out_name = osp.splitext(self.file)[0]
-
 
         out_name, out_format = osp.splitext(out_name)
 
@@ -393,17 +507,36 @@ class FF():
             out_name = osp.join(out_folder, out_name)
 
         cmd.append(out_name)
-        print(" ".join(cmd))
-        sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE)
+        _msg = ["exporting", out_name%(start_frame+1)]
+        if nb_frames >1:
+            _msg += ["to ", out_name%(start_frame+1+nb_frames)]
 
-        with open(out_name+".txt", 'w', encoding="utf8") as _fi:
-            _fi.write(" ".join(cmd) +"\n")
+        print(*_msg, " ...")
+        proc = sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE, stdout=sp.PIPE)
+        proc.wait()
+
+        out_files = []
+        if start_frame != 0:
+            for i in range(nb_frames, 0, -1):
+                os.rename(out_name%i, out_name%(i+start_frame + 1))
+                out_files.append(out_name%(i+start_frame + 1))
+
+        proc.stdout.close()
+
+        return cmd, out_files
 
 
-        return osp.abspath(out_name)
 
-
-    def export_clip(self, out_name=None, start=0, nb_frames=None, scale=1, step=1, stream=0, out_folder=None, **kwargs):
+    def export_clip(self,
+                    out_name: Optional[str] = None,
+                    start: Union[int, float, str] = 0,
+                    nb_frames: Optional[int] = None,
+                    scale: float = 1.,
+                    step: int = 1,
+                    stream: int = 0,
+                    out_folder: str = None,
+                    overwrite: bool = False,
+                    **kwargs):
         """ extract video clip
         Args:
             out_name    (str [None]) default is <input_name>_framein_frame_out<input_format>
@@ -418,10 +551,12 @@ class FF():
         ffmpeg -i a.mp4 -force_key_frames 00:00:09,00:00:12 out.mp4
 
         """
-        cmd = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step,
+        cmd, start_frame = self._export(start=start, nb_frames=nb_frames, scale=scale, step=step,
                            stream=stream, crop=kwargs.get('crop', None))
 
         # resolve name
+        # TODO should be start_frames instead
+        # nb_frames should be either frames or time 
         if out_name is None:
             if nb_frames is None:
                 nb_frames = self.stats["nb_frames"]
@@ -443,35 +578,46 @@ class FF():
             os.makedirs(out_folder, exist_ok=True)
             out_name = osp.join(out_folder, out_name)
 
+        if osp.isfile(out_name):
+            assert overwrite, "file exists set overwrite=True"
+            cmd.insert(1, '-y')
+
+
         if out_format == '.gif' or out_format == '.webm':
             cmd = cmd + ['-bitrate', '3000k']
+        else:
+            cmd += ["-c:a", "copy"]
 
         cmd.append(out_name)
-        print(" ".join(cmd))
-        sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE)
+        print(cmd)
+        sp.call(cmd)
+        # proc = sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE, stdout=sp.PIPE)
+        # proc.wait()
+
 
         return osp.abspath(out_name)
 
 
     def fits_in_memory(self, nb_frames=None, dtype_size=1, with_grad=0, scale=1, stream=0,
-                       memory_type="GPU", step=1):
+                       memory_type="GPU", step=1) -> int:
         """
             returns max number of frames that fit in memory
         """
         if not self.stats:
             self.get_video_stats(stream=stream)
 
-        nb_frames = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'],
-                                                                          nb_frames)
+        if nb_frames is None:
+            nb_frames = self.stats['nb_frames']
+        nb_frames = min(self.stats['nb_frames'], nb_frames)
 
-        width = self.stats['width'] * scale
-        height = self.stats['height'] * scale
-        _requested_ram = (nb_frames * width * height * dtype_size * (1 + with_grad))/step//2**20
+        _w = self.stats['width'] * scale
+        _h = self.stats['height'] * scale
+        _requested_ram = (nb_frames * _w * _h * dtype_size * (1 + with_grad))/step//2**20
         _available_ram = CPUse().available if memory_type == "CPU" else GPUse().available
 
         if _requested_ram > _available_ram:
             max_frames = int(nb_frames * _available_ram // _requested_ram)
-            _msg = f"{Col.B}Cannot load [{nb_frames},{height},{width},3] frames in {memory_type} {Col.RB}"
+            _msg = f"{Col.B}Cannot load [{nb_frames},{_h},{_w},3] frames in {memory_type} {Col.RB}"
             _msg += f"{_available_ram} MB{Col.YB}, loading only {max_frames} frames {Col.AU}"
             print(_msg)
             nb_frames = max_frames
@@ -532,7 +678,8 @@ class FF():
                  stream: int = 0,
                  step: int = 1,
                  dtype: np.dtype = np.uint8,
-                 memory_type: str = "CPU") -> np.ndarray:
+                 memory_type: str = "CPU",
+                 **kwargs) -> np.ndarray:
         """
         read video to numpy
         Args
@@ -549,23 +696,39 @@ class FF():
         if not self.stats:
             self.get_video_stats(stream=stream)
 
-        if isinstance(start, float):
-            _time = self.strftime(start)
-            start = self.time_to_frame(start)
-        else:
-            _time = self.frame_to_time(start)
+        _fcmd = [self.ffmpeg, '-i', self.file]
+
+        _interval, start_frame = self.format_start_end(start, nb_frames)
+        _fcmd += _interval
+
+        _fcmd += self.build_filter_graph(start_frame=start_frame, scale=scale, **kwargs)
 
 
-        _fcmd = [self.ffmpeg, '-i', self.file, '-ss', _time, '-start_number', str(start),
-                 '-f', 'rawvideo', '-pix_fmt', 'rgb24']
+        _fcmd += ['-start_number', str(start_frame), '-f', 'rawvideo', '-pix_fmt', 'rgb24']
+
+        # if isinstance(start, float):
+        #     _time = self.strftime(start)
+        #     start = self.time_to_frame(start)
+        # else:
+        #     _time = self.frame_to_strftime(start)
+
+
+        # _fcmd = [self.ffmpeg, '-i', self.file, '-ss', _time, '-start_number', str(start),
+        #          '-f', 'rawvideo', '-pix_fmt', 'rgb24']
 
         width = self.stats['width']
         height = self.stats['height']
         if scale != 1:
             width = int(self.stats['width'] * scale)
             height = int(self.stats['height'] * scale)
-            _scale = ['-s', f'{width}x{height}']
-            _fcmd = _fcmd + _scale
+
+        if 'crop' in kwargs:
+            crop = kwargs['crop']
+            width = crop[0] = crop[2]
+            height = crop[1] = crop[3]
+
+            # _scale = ['-s', f'{width}x{height}']
+            # _fcmd = _fcmd + _scale
         _fcmd += ['pipe:']
 
         bufsize = width*height*3
@@ -577,10 +740,9 @@ class FF():
                                                                           nb_frames + start)
 
         proc = sp.Popen(_fcmd, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, bufsize=bufsize)
-        out = self._to_numpy_proc(start, to_frame, step, width, height, dtype, bufsize, proc)
-
-        proc.stdout.close()
+        out = self._to_numpy_proc(start_frame, to_frame, step, width, height, dtype, bufsize, proc)
         proc.wait()
+        proc.stdout.close()
 
         return out
 
@@ -607,13 +769,18 @@ class FF():
 
         out = out[0][None] if len(out) == 1 else np.stack(out, axis=0)
 
-        # TODO: this assumes that video input is uint8 but thats not a given: validate pixel format
+        # TODO: this assumes that video input is uint8n: validate pixel format
         if dtype in (np.float32, np.float64):
             out /= 255.
         del buffer
 
         return out
 
+
+
+
+
+## NOTES
         # def stream(stream_spec, cmd='ffmpeg', capture_stderr=False, input=None, quiet=False, overwrite_output=False):
 #     args = compile(stream_spec, cmd, overwrite_output=overwrite_output)
 
@@ -632,60 +799,58 @@ class FF():
 #     return process.stdout.read(framesize)
 
 
-"""
 # lossless
-ffmpeg -i left.avi -i right.avi -filter_complex hstack -c:v ffv1 output.avi
-# lossy
-ffmpeg -i left.avi -i right.avi -filter_complex "hstack,format=yuv420p" -c:v libx264 -crf 18 output.mp4
-# audio
-# ffmpeg -i left.avi -i right.avi -filter_complex "[0:v][1:v]hstack,format=yuv420p[v];[0:a][1:a]amerge[a]" -map "[v]" -map "[a]" -c:v libx264 -crf 18 -ac 2 output.mp4
+# ffmpeg -i left.avi -i right.avi -filter_complex hstack -c:v ffv1 output.avi
+# # lossy
+# ffmpeg -i left.avi -i right.avi -filter_complex "hstack,format=yuv420p" -c:v libx264 -crf 18 output.mp4
+# # audio
+# # ffmpeg -i left.avi -i right.avi -filter_complex "[0:v][1:v]hstack,format=yuv420p[v];[0:a][1:a]amerge[a]" -map "[v]" -map "[a]" -c:v libx264 -crf 18 -ac 2 output.mp4
 
-snippets
-https://trac.ffmpeg.org/wiki/FFprobeTips
+# snippets
+# https://trac.ffmpeg.org/wiki/FFprobeTips
 
-# extract 3 frames at second 7
-ffmpeg -i MUCBCN.mp4 -ss 00:00:07.000 -vframes 3 thumb%04d.jpg -hide_banner #70KB
-ffmpeg -i MUCBCN.mp4 -ss 00:00:07.000 -vframes 3 thumb%04d.png -hide_banner #2MB
-ffmpeg -i MUCBCN.mp4 -ss 00:00:07.000 -vframes 3 thumb%04d.bmp -hide_banner #6MB
+# # extract 3 frames at second 7
+# ffmpeg -i MUCBCN.mp4 -ss 00:00:07.000 -vframes 3 thumb%04d.jpg -hide_banner #70KB
+# ffmpeg -i MUCBCN.mp4 -ss 00:00:07.000 -vframes 3 thumb%04d.png -hide_banner #2MB
+# ffmpeg -i MUCBCN.mp4 -ss 00:00:07.000 -vframes 3 thumb%04d.bmp -hide_banner #6MB
 
-# extract and ensure renumbering is frame 
-ffmpeg -i 'MUCBCN.mp4' -ss 00:00:12.000 -start_number 299 -vframes 3 thumb%04d.jpg -hide_banner
+# # extract and ensure renumbering is frame 
+# ffmpeg -i 'MUCBCN.mp4' -ss 00:00:12.000 -start_number 299 -vframes 3 thumb%04d.jpg -hide_banner
 
-# extract as video 
-ffmpeg -ss 120.2 -t 0.75 -i MUCBCN.mp4 out_muc.mp4 #use h264 default
-# ffmpeg -ss 120.2 -t 1.75 -i MUCBCN.mp4 out_muc.mp4 #-vcodec copy or -c:v copy fail to set the right timeline
+# # extract as video 
+# ffmpeg -ss 120.2 -t 0.75 -i MUCBCN.mp4 out_muc.mp4 #use h264 default
+# # ffmpeg -ss 120.2 -t 1.75 -i MUCBCN.mp4 out_muc.mp4 #-vcodec copy or -c:v copy fail to set the right timeline
 
-#extract as webm
-# No bit rate set. Defaulting to 96000 bps. - good bit rate 2000 to 3000 ; resize video - 
+# #extract as webm
+# # No bit rate set. Defaulting to 96000 bps. - good bit rate 2000 to 3000 ; resize video - 
 
-# scaling
-ffmpeg -i input.jpg -vf scale=320:-1 output_320.png # keep aspect ration
+# # scaling
+# ffmpeg -i input.jpg -vf scale=320:-1 output_320.png # keep aspect ration
 
-ffmpeg -i input.jpg -vf "scale=iw/2:ih/2" input_half_size.png
-ffmpeg -i input.jpg -vf "scale='min(320,iw)':'min(240,ih)'" input_not_upscaled.png
-# scale, clip time
-ffmpeg -ss 120.0 -t 3.0 -i MUCBCN.mp4 -vf "scale='min(320,iw/4)':-1" output.webm
+# ffmpeg -i input.jpg -vf "scale=iw/2:ih/2" input_half_size.png
+# ffmpeg -i input.jpg -vf "scale='min(320,iw)':'min(240,ih)'" input_not_upscaled.png
+# # scale, clip time
+# ffmpeg -ss 120.0 -t 3.0 -i MUCBCN.mp4 -vf "scale='min(320,iw/4)':-1" output.webm
 
-#ok
-sp.Popen(['ffmpeg', '-i', 'MUCBCN.mp4', '-ss', '00:00:20.000', '-t', '12.0', 'MUCBCN_500-800.mp4'], stdin=sp.PIPE, stderr=sp.PIPE)
-#fail
-sp.Popen(['ffmpeg', '-i', 'MUCBCN.mp4', '-ss', '00:00:20.000', '-t', '11.0', '-vf', 'scale=iw/.25:-1', 'MUCBCN_500-800_.25.mp4'], stdin=sp.PIPE, stderr=sp.PIPE)
-#ok
-ffmpeg -ss 00:00:20.000 -t 12.0 -i MUCBCN.mp4 -vf "scale=iw/2:-1" output.mp4
-ffmpeg -ss 00:00:20.000 -t 12.0 -i MUCBCN.mp4 -vf scale=iw/2:-1 output.mp4
+# #ok
+# sp.Popen(['ffmpeg', '-i', 'MUCBCN.mp4', '-ss', '00:00:20.000', '-t', '12.0', 'MUCBCN_500-800.mp4'], stdin=sp.PIPE, stderr=sp.PIPE)
+# #fail
+# sp.Popen(['ffmpeg', '-i', 'MUCBCN.mp4', '-ss', '00:00:20.000', '-t', '11.0', '-vf', 'scale=iw/.25:-1', 'MUCBCN_500-800_.25.mp4'], stdin=sp.PIPE, stderr=sp.PIPE)
+# #ok
+# ffmpeg -ss 00:00:20.000 -t 12.0 -i MUCBCN.mp4 -vf "scale=iw/2:-1" output.mp4
+# ffmpeg -ss 00:00:20.000 -t 12.0 -i MUCBCN.mp4 -vf scale=iw/2:-1 output.mp4
 
-#play
-#half speed (audio doen not chnage speed)
-ffplay MUCBCN.mp4 -vf "setpts=2*PTS"
+# #play
+# #half speed (audio doen not chnage speed)
+# ffplay MUCBCN.mp4 -vf "setpts=2*PTS"
 
 
-# gif export
-ffmpeg -i INPUT -loop 10 -final_delay 500 out.gif
-    loop -1 none, 0 forever
+# # gif export
+# ffmpeg -i INPUT -loop 10 -final_delay 500 out.gif
+#     loop -1 none, 0 forever
 
-#https://ffmpeg.org/ffmpeg-formats.html
+# #https://ffmpeg.org/ffmpeg-formats.html
 
-#optimize gif export: generate palette / doesnt really work...
-ffmpeg -y -i INPUT -vf palettegen palette.png
-ffmpeg -y -i INPUT -i palette.png -filter_complex paletteuse OUT.gif
-"""
+# #optimize gif export: generate palette / doesnt really work...
+# ffmpeg -y -i INPUT -vf palettegen palette.png
+# ffmpeg -y -i INPUT -i palette.png -filter_complex paletteuse OUT.gif

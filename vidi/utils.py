@@ -2,10 +2,14 @@
 util functions for vidi
 tested only in Ubuntu
 """
+from typing import Optional
 import subprocess as sp
 import time
 import numpy as np
 import psutil
+import torch
+
+
 
 class Col:
     """colorization shortucts"""
@@ -40,7 +44,7 @@ class Timer:
             if self.live_tics and name is not None:
                 print(f" Time:({name} {color}\t{indent}{self.times[name]*1000,:.3} ms{Col.AU})")
 
-    def subtic(self, name, color=Col.GB, indent="  "):
+    def subtic(self, name: str, color: str = Col.GB, indent: str = "  ") -> None:
         """
         computes time diff with .last
         """
@@ -49,11 +53,10 @@ class Timer:
             while name in self.times:
                 name = name+"0"
             self.times["subtic:"+name] = _now - self.last
-
             if self.live_tics and name is not None:
                 print(f" Time:({name} {color}\t{indent}{self.times[name]*1000:.3}ms{Col.AU})")
 
-    def toc(self, name=None):
+    def toc(self, name: Optional[str] = None):
         self.tic(name)
 
         name = self.name if self.name is not None else ""
@@ -104,16 +107,17 @@ def dtoc(timer, msg):
     if timer is not None:
         timer.toc(msg)
 
-def frame_to_time(frame, fps):
+def frame_to_time(frame: int, fps: float) -> float:
     """convert frame number to time"""
     outtime = frame/fps
     return outtime
 
-def time_to_frame(intime, fps):
+def time_to_frame(intime: float, fps: float) -> int:
+    """ time in seconds to frame int"""
     frame = int(intime * fps)
     return frame
 
-def strftime(t):
+def strftime(t: float) -> str:
     """seconds to str"""
     _t = int(t)
     return f"{(_t//3600)%24:02d}:{(_t//60)%60:02d}:{_t%60:02d}.{(int((t - _t)*1000)):03d}"
@@ -121,7 +125,7 @@ def strftime(t):
 def tofloat32(uint8_value):
     return uint8_value/np.array(255, dtype=np.float32)
 
-def validate_dtype(dtype, as_torch=False):
+def validate_dtype(dtype, as_torch: bool = False):
     if dtype in ("float", "float32"):
         dtype = "float32"
     elif dtype in ("double", "float64"):
@@ -131,14 +135,14 @@ def validate_dtype(dtype, as_torch=False):
     elif dtype in ("uint", "uint8"):
         dtype = "uint8"
     else:
-        assert "dtype <%s> not recognized"%dtype
+        assert f"dtype <{dtype}> not recognized"
     if as_torch:
-        import torch
         dtype = torch.__dict__[dtype]
     return dtype
 
 def get_smi(query):
-    _cmd = ['nvidia-smi', '--query-gpu=memory.%s'%query, '--format=csv,nounits,noheader']
+    """reutrn nvidia-smi query"""
+    _cmd = ['nvidia-smi', f'--query-gpu=memory.{query}', '--format=csv,nounits,noheader']
     return int(sp.check_output(_cmd, encoding='utf-8').split('\n')[0])
 
 class GPUse:

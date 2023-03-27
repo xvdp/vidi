@@ -16,7 +16,7 @@ def setup_package():
     ''' setup '''
     metadata = dict(
         name='vidi',
-        version=_set_version(version='0.14'),
+        version=_set_version(version='0.15'),
         description='modules to access video',
         url='http://github.com/xvdp/vidi',
         author='xvdp',

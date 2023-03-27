@@ -8,7 +8,7 @@ import subprocess as sp
 import numpy as np
 import torch
 
-from .utils import *
+from .utils import frame_to_time, time_to_frame, strftime, validate_dtype, Timer, Col
 from .ff_fun import ffprobe
 
 # pylint: disable=no-member
@@ -32,7 +32,8 @@ class FFread:
         Examples:
 
             with vidi.FFread(src, batch_size=20, out_type="torch", start=None, frames=1000,
-                             pix_fmt="rgb24, debug=True, dtype="float32", device="cpu", grad=False) as F:
+                             pix_fmt="rgb24, debug=True, dtype="float32", device="cpu",
+                             grad=False) as F:
                 F.get_batch_loop()
                 # F.get_batch() # slower than looping the reads Test multiprocessing
 
@@ -66,7 +67,9 @@ class FFread:
         self.data = self._init_data()
 
         self.debug = debug
-        self.timer = None if not debug else Timer("FFread(src, batch_size=%d, out_type=%s)"%(self.batch_size, self.out_type))
+        self.timer = None
+        if  debug:
+            self.timer = Timer(f"FFread(src, batch_size={self.batch_size}, out_type={self.out_type})")
         self._cmd = None
         self._pipe = None
         self._ffmpeg = 'ffmpeg' if platform.system() != 'Windows' else 'ffmpeg.exe'
@@ -115,7 +118,7 @@ class FFread:
         self.framecount += self.batch_size
 
         if self.timer is not None:
-            self.timer.tic("batch retrieved, framecount [%d]"%self.framecount)
+            self.timer.tic(f"batch retrieved, framecount [{self.framecount}]")
 
         if self.framecount >= self.frames:
             return self.close()
@@ -126,25 +129,26 @@ class FFread:
 
         _data = np.frombuffer(data, dtype=np.uint8)
         if self.timer is not None:
-            self.timer.subtic("update from buffer [%d]"%_framecount)
+            self.timer.subtic(f"update from buffer [{_framecount}]")
 
         _data = _data.reshape(self.batch_size, self._h, self._w, self._c)
         if self.timer is not None:
-            self.timer.subtic("reshaped to (%d, %d, %d, %d) [%d]"%(self.batch_size, self._h, self._w, self._c, _framecount))
+            self.timer.subtic(f"viewas {self.batch_size, self._h, self._w, self._c} [{_framecount}]")
 
 
         if self.out_type == "numpy":
             if "float" in self.dtype:
                 _data = _data/self._255
             if self.timer is not None:
-                self.timer.subtic("to dtype %s, [%d]"%(self.dtype, _framecount))
+                self.timer.subticf(f"to dtype {self.dtype}, {_framecount}")
             self.data[:] = _data
             if self.timer is not None:
-                self.timer.subtic("fill np array [%d]"%(_framecount))
+                self.timer.subtic(f"fill np array {_framecount}")
         else:
-            self.data[:] = ((torch.from_numpy(_data).to(device=self.device).permute(0, 3, 1, 2)).to(dtype=torch.__dict__[self.dtype])/self._div).contiguous()
+            self.data[:] = ((torch.as_tesnor(_data).permute(0,3,1,2)).to(dtype=torch.__dict__[self.dtype],
+                                                                         device=self.device)/self._div).contiguous()
             if self.timer is not None:
-                self.timer.subtic("fill tensor and permuted [%d]"%(_framecount))
+                self.timer.subtic(f"fill tensor and permuted [{_framecount}]")
 
     def get_batch_loop(self):
         """ Fills batch data by reading from ffmpeg buffer, one image at a time
@@ -157,7 +161,7 @@ class FFread:
         self.framecount += self.batch_size
 
         if self.timer is not None:
-            self.timer.tic("batch retrieved, framecount [%d]"%self.framecount)
+            self.timer.tic(f"batch retrieved, framecount [{self.framecount}]")
 
         if self.framecount >= self.frames:
             return self.close()
@@ -166,39 +170,29 @@ class FFread:
 
         _data = np.frombuffer(data, dtype=np.uint8)
         if self.timer is not None:
-            self.timer.subtic("[%d]update from buffer "%(self.framecount+idx))
+            self.timer.subtic(f"[{self.framecount+idx}] update from buffer ")
 
         _data = _data.reshape(self._h, self._w, self._c)
         if self.timer is not None:
-            self.timer.subtic("[%d] reshaped to (%d, %d, %d) "%((self.framecount+idx), self._h, self._w, self._c))
+            self.timer.subtic(f"[{self.framecount+idx}] reshaped to {self._h, self._w, self._c} ")
 
 
         if self.out_type == "numpy":
             if "float" in self.dtype:
                 _data = _data/self._255
                 if self.timer is not None:
-                    self.timer.subtic("to dtype %s, [%d]"%(self.dtype, self.framecount))
+                    self.timer.subtic(f"to dtype {self.dtype}, [{ self.framecount}]")
 
             self.data[idx] = _data
             if self.timer is not None:
-                self.timer.subtic("fill np array at index %d, [%d]"%(idx, self.framecount))
+                self.timer.subtic(f"fill np array at index {idx}, [{self.framecount}]")
         else:
-            self.data[idx] = ((torch.from_numpy(_data).to(device=self.device).permute(2, 0, 1)).to(dtype=torch.__dict__[self.dtype])/self._div).contiguous()
+            self.data[idx] = ((torch.from_numpy(_data).permute(2, 0, 1)).to(device=self.device,
+                                                                            dtype=torch.__dict__[self.dtype])/self._div).contiguous()
 
             #self.data[idx] = torch.from_numpy((_data)).permute(2, 0, 1)
             if self.timer is not None:
-                self.timer.subtic("[%d] fill tensor and permuted at index"%(idx+self.framecount))
-
-
-        """
-        data = np.frombuffer(self._pipe.stdout.read(self._bufsize), dtype=np.uint8).reshape(1, self._c, self._h, self._w)
-        if self.timer is not None:
-            self.timer.subtic("subtic, from buffer [%d]"%self.framecount)
-        data = (torch.from_numpy(data).to(device=self.device).permute(0, 3, 1, 2).to(dtype=self.dtype)/self._div).contiguous()
-        if self.timer is not None:
-            self.timer.tic("to torch [%d]"%self.framecount)
-        self.framecount += 1
-        """
+                self.timer.subtic(f"[{idx+self.framecount}] fill tensor and permuted at index")
 
 
     def _init_data(self):
@@ -206,8 +200,9 @@ class FFread:
             return np.zeros([self.batch_size, self._h, self._w, self._c], self.dtype)
         else: # out_type: torch
             return torch.zeros([self.batch_size, self._c, self._h, self._w],
-                               dtype=torch.__dict__[self.dtype], device=self.device, requires_grad=self.grad)
- 
+                               dtype=torch.__dict__[self.dtype],
+                               device=self.device, requires_grad=self.grad)
+
     def _build_cmd(self):
 
         self._cmd = [self._ffmpeg]
@@ -234,7 +229,7 @@ class FFread:
             return value
         if isinstance(value, float): # interpret as time, return frame
             return time_to_frame(value, fps=self.stats["avg_frame_rate"])
-        assert False, "%sexpected int (frames) or float (time), got %s%s"%(Col.RB, str(type(value)), Col.AU)
+        assert False, f"{Col.RB}expected int (frames) or float (time), {type(value)}{Col.AU}"
 
     def _as_time(self, value):
         """int or float to time"""
@@ -242,11 +237,12 @@ class FFread:
             return value
         if isinstance(value, int): # interpret as frame, return time
             return frame_to_time(value, fps=self.stats["avg_frame_rate"])
-        assert False, "%sexpected int (frames) or float (time), got %s%s"%(Col.RB, str(type(value)), Col.AU)
+        assert False, f"{Col.RB}expected int (frames) or float (time), got {type(value)}{Col.AU}"
 
     def _validate_batches(self):
-        assert self.frames >= self.batch_size, "%srequesting batch size (%d) larger than number of frames in video: (%d)%s"%(Col.RB, self.batch_size, self.frames, Col.AU)
+        assert self.frames >= self.batch_size, f"{Col.RB}requesting batch size \
+            ({self.batch_size}) > len(video): ({self.frames}){Col.AU}"
         _frames = self.batch_size*(self.frames//self.batch_size)
         if _frames < self.frames:
-            print("%sskipping last %d frames from batch%s"%(Col.YB, (self.frames - _frames), Col.AU))
+            print(f"{Col.YB}skipping last {(self.frames - _frames)} frames from batch%s{Col.AU}")
             self.frames = _frames

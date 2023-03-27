@@ -8,6 +8,7 @@ import platform
 import subprocess as sp
 import numpy as np
 import torch
+from torch import Tensor
 from torch.utils.data import Dataset
 
 from .utils import dprint, Col, frame_to_time, strftime, time_to_frame
@@ -89,10 +90,10 @@ class AVDataset(Dataset):
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.frames
 
-    def __getitem__(self, i=1):
+    def __getitem__(self, i: int = 1) -> Optional[Tensor]:
         """ i can be used for ad hoc seek
             reads from buffer
             applies pil transforms
@@ -122,7 +123,7 @@ class AVDataset(Dataset):
         self.framecount += 1
         return data
 
-    def open(self):
+    def open(self) -> None:
         """ manual overwrite to with ... __enter__
         """
         if self._pipe is not None:
@@ -132,12 +133,14 @@ class AVDataset(Dataset):
         self._pipe = sp.Popen(self._cmd, stdout=sp.PIPE, bufsize=self._bufsize)
 
 
-    def close(self):
+    def close(self) -> None:
         """ manual overwrite to with ... __exit__
         """
         if self._pipe is not None and not self._pipe.stdout.closed:
             self._pipe.stdout.flush()
+            self._pipe.stdout.close()
             self._pipe.terminate()
+        if self._pipe is not None and not self._pipe.stdout.closed:
             sp.run(['pkill', '-x', 'ffmpeg'], check=True) # this looks bad
         self._pipe = None
 
@@ -185,15 +188,17 @@ class AVDataset(Dataset):
             return time_to_frame(value, fps=self.stats["rate"])
         assert False, f"{Col.RB}expected int (frames) or float (time), got {type(value)}{Col.AU}"
 
-    def _as_time(self, value):
+    def _as_time(self, value: Union[int, float, str, None]) -> float:
         """int or float to time"""
         if value is None or isinstance(value, float):
             return value
         if isinstance(value, int): # interpret as frame, return time
             return frame_to_time(value, fps=self.stats["rate"])
+        elif isinstance(value, str):
+            return sum(x * float(t) for x, t in zip([3600, 60, 1], value.split(":")))
         assert False, f"{Col.RB}expected int (frames) or float (time), got {type(value)}{Col.AU}"
 
-    def parse_ftransform(self, ftransform):
+    def parse_ftransform(self, ftransform: Optional[tuple]) -> Optional[dict]:
         """
         Any transformation that modifies buffer size,
         currently supported scale=, crop=,

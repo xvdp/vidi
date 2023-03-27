@@ -1,8 +1,14 @@
 # VIDI
 =====
 
+
+v 0.15 - could break things. WILL remove files in the future and simplify
+added output to subtitles
+updated video dataset
+ffplay with subtitles on loops
+
 ### WIP: ffmpeg wrapper used on Ubuntu only
-### Not sufficiently robust, untested
+### Not sufficiently robust, untested  : only usable as template.
 rewrite to simplify
 * plays video
 * stitch video from frames

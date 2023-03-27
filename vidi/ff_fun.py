@@ -8,18 +8,18 @@ import glob
 import subprocess as sp
 from platform import system
 
-from .utils import *
+from .utils import frame_to_time, strftime, Col
 from .ff_main import FF
 
 __all__ = ["ffplay", "ffstitch", "ffprobe", "ffread"]
 
-def ffprobe(src, entries=None, stream=0, verbose=False):
+def ffprobe(src: setattr) -> dict:#, entries=None, stream=0, verbose=False):
     """ Wrapper for ffprobe, returning size, frame rate, number of frames
     """
-    assert osp.isfile(src), "%sinexistent file <%s>%s"%(Col.RB, src, Col.AU)
+    assert osp.isfile(src), f"{Col.RB}inexistent file <{src}>{Col.AU}"
 
     V = FF(src)
-    full_stats = V.get_video_stats(stream=stream, entries=entries, verbose=verbose)
+    # full_stats = V.get_video_stats(stream=stream, entries=entries, verbose=verbose)
     return V.stats
 
 def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, noborder=True, showframe=False, fontcolor="white"):
@@ -59,7 +59,7 @@ def ffplay(src, start=0, fps=None, loop=0, autoexit=True, fullscreen=False, nobo
         fcmd += ["-framerate", str(fps)]
     else:
         if fps is not None:
-            print("%scustom fps not supported for <%s>%s"%(Col.YB, src, Col.AU))
+            print(f"{Col.YB}custom fps not supported for <{src}>{Col.AU}")
 
 
     # file lists and folders
@@ -161,7 +161,9 @@ def ffread(src, nb_frames=None, step=1):
     return FF(src).to_numpy(nb_frames=nb_frames, step=step)
 
 
-def _ffplaymsg(fcmd="", msg=""):
+def _ffplaymsg(fcmd: str = "", msg="") -> None:
+    if msg:
+        print(msg)
     print(Col.B, " ".join(fcmd))
     print("-------Interaction--------")
     print(" 'q', ESC        Quit")
@@ -199,10 +201,10 @@ def _ff_check_sequence(src, start=0):
     _files = sorted(glob.glob(_pattern))#[0].split(_front)[1].split(_back)[0]
 
     if not _files:
-        print("%sno files found%s"%(Col.RB, Col.AU))
+        print(f"{Col.RB}no files found{Col.AU}")
         return None
 
-    print("%s%d files %s%s"%(Col.GB, len(_files), src, Col.AU))
+    print(f"{Col.GB}{len(_files)}files {src}{Col.AU}")
     first_frame = int(_files[0].split(_front)[1].split(_back)[0])
     return first_frame
 
@@ -218,16 +220,16 @@ def _ff_format_input_list(src, start=0):
     # patterned file sequence, eg. metro%0d.png
     if '%' in src:
         _start = _ff_check_sequence(src, start)
-        assert _start is not None, "%sno files with pattern <%s> found%s"%(Col.RB, src, Col.AU)
+        assert _start is not None, f"{Col.RB}no files with pattern <{src}> found{Col.AU}"
         if _start != start:
-            print("%sstart frame <%d> not found, using <%d> instead%s"%(Col.YB, start, _start, Col.AU))
+            print(f"{Col.YB}start frame <{start}> not found, using <{_start}> instead{Col.AU}")
             start = _start
         fcmd += ["-start_number", str(start)]
 
     # files of pattern in folder e.g. *.png or metro*.png
     elif '*' in src:
         if start is not None:
-            print("%signoring 'start' argument, only valid with templated arguments%s"%(Col.YB, Col.AU))
+            print(f"{Col.YB}ignoring 'start' argument, only valid with templated arguments{Col.AU}")
         fcmd += ["-pattern_type", "glob"]
     elif start and start is not None:
         if isinstance(start, int): # interpret as frame, return time
