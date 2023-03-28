@@ -1,11 +1,27 @@
 # VIDI
 =====
 
+Useful functions are mostly in ff_main.py
+
+
+v 0.16 fixed FF.export_frames() FF.to_numpy() FF.export_clip()
+added FF.vlc() to play exact in and out frames using cvlc
+time in and out for these functions can be enterd as
+start=, nb_frames= or end=
+start and end accept time
+if float in seconds,
+if str in strf time HH:MM:SS.mmm
+if int in frames
+
+to deprecate FF.play() uses ffplay -ss and -t are not valid
 
 v 0.15 - could break things. WILL remove files in the future and simplify
 added output to subtitles
 updated video dataset
-ffplay with subtitles on loops
+
+------------------
+
+### TODO remove unused untested routines
 
 ### WIP: ffmpeg wrapper used on Ubuntu only
 ### Not sufficiently robust, untested  : only usable as template.
