@@ -92,7 +92,7 @@ class FF():
         self.stats = {'type': 'video', 'file': self.file}
         self.stats['sar'] = 1.
         if 'sample_aspect_ratio' in _stats and _stats['sample_aspect_ratio'] != '1:1':
-            _sar = [float(a) for a in (_stats['sample_aspect_ratio'].split(':')[0])]
+            _sar = [float(a) for a in (_stats['sample_aspect_ratio'].split(':'))]
             self.stats['sar'] = _sar[0]/_sar[1]
 
 
