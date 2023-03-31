@@ -53,6 +53,7 @@ class FF():
         self.file = fname
         if fname is not None and osp.isfile(fname):
             self.get_video_stats()
+        self.frame_range = []
 
 
     def get_video_stats(self,
@@ -268,7 +269,7 @@ class FF():
         """
         if not self.stats:
             self.get_video_stats(stream=kwargs.get('stream', 0))
-        _io, *_ = self._start_end_time(start, nb_frames, end)
+        _io = self._start_end_time(start, nb_frames, end)
         if _io:
             _io = [f'--start-time={_io[0]}', f"--stop-time={_io[0]+_io[1]}"]
         _fcmd = ['cvlc'] + _io + [self.file]
@@ -327,7 +328,8 @@ class FF():
             _fcmd += ["-fs"]
         _fcmd += ['-i', self.file]
 
-        _interval, start_frame, nb_frames = self.format_start_end(start, nb_frames, end)
+        _interval = self.format_start_end(start, nb_frames, end)
+        start_frame, nb_frames = self.frame_range
         print(_interval, start_frame)
         _fcmd += _interval
 
@@ -451,7 +453,7 @@ class FF():
                 nb_frames: Optional[int] = None,
                 stream: int = 0,
                 end: Union[int, float, str, None] = None,
-                **kwargs) -> tuple[str, int, int]:
+                **kwargs) -> str:
         """ returns export command stub and start_frame
         Args
             start       (int, float str) # float is interpreted as time, int as frame
@@ -461,13 +463,14 @@ class FF():
         if not self.stats:
             self.get_video_stats(stream=stream)
 
-        _interval, start_frame, nb_frames = self.format_start_end(start, nb_frames, end)
+        _interval = self.format_start_end(start, nb_frames, end)
+        start_frame, nb_frames = self.frame_range
 
         cmd =  [self.ffmpeg, '-i', self.file] + _interval
 
         cmd += self.build_filter_graph(start_frame=start_frame, **kwargs)
 
-        return cmd, start_frame, nb_frames
+        return cmd
 
     def anytime_to_frame_time(self,
                               in_time: Union[int, float, str],
@@ -495,7 +498,7 @@ class FF():
                         start: Union[int, float, str] = 0,
                         nb_frames: Optional[int] = None,
                         end: Union[int, float, str, None] = None,
-                        fps: Optional[float] = None) -> tuple[list, int, int]:
+                        fps: Optional[float] = None) -> list:
         """
         Args
             start       (int, float, str) # float is interpreted as time, int as frame
@@ -520,14 +523,15 @@ class FF():
                 nb_frames = _max
             end_time = self.frame_to_time(nb_frames)
             out = [start_time, end_time]
-        return out, start_frame, nb_frames
+        self.frame_range = [start_frame, nb_frames]
+        return out
 
 
     def format_start_end(self,
                          start: Union[int, float, str] = 0,
                          nb_frames: Optional[int] = None,
                          end: Union[int, float, str, None] = None,
-                         fps: Optional[float] = None) -> tuple[list, int, int]:
+                         fps: Optional[float] = None) -> list:
         """ if start > 0 or nb_frames  != None: [--ss seconds -t seconds]
 
         Args
@@ -535,41 +539,10 @@ class FF():
             nb_frames   (int)   number of frames from start
             end         (int, float, str) overrides nb_frames
         """
-        out, start_frame, nb_frames = self._start_end_time(start, nb_frames, end, fps)
+        out = self._start_end_time(start, nb_frames, end, fps)
         if out:
             out = ['-ss', str(out[0]), '-t', str(out[1])]
-        return out, start_frame, nb_frames
-
-
-    # def format_start_end(self,
-    #                      start: Union[int, float, str] = 0,
-    #                      nb_frames: Optional[int] = None,) -> tuple[list, int]:
-    #     """ if start > 0 or nb_frames  != None: [--ss seconds -t seconds]
-    
-    #     could also use  '-vframes', str(nb_frames)]
-    #     Args
-    #         start       (int, float, str) # float is interpreted as time, int as frame
-    #         nb_frames   (int)  
-    #     """
-    #     out = []
-    #     start_frame = 0
-    #     if start or nb_frames is not None:
-    #         if isinstance(start, str):
-    #             start = self.strftime_to_time(start)
-
-    #         if isinstance(start, float):
-    #             start_time = start
-    #             start_frame = self.time_to_frame(start, self.stats['rate'])
-    #             print(f"time: {start}, start frame: {start_frame}")
-    #         else: # int
-    #             start_frame = start
-    #             print(f"frame {start}")
-    #             start_time = self.frame_to_time(start)
-
-    #         _max = self.stats['nb_frames'] - start
-    #         nb_frames = _max if nb_frames is None else min(_max, nb_frames)
-    #         out = ['-ss', f"{start_time}", '-t', str(self.frame_to_time(nb_frames))]
-    #     return out, start_frame
+        return out
 
 
     def export_frames(self,
@@ -602,9 +575,10 @@ class FF():
             out_format  (str) in (".png", ".jpg", ".bmp") format override
             crop        (list, tuple (w,h,x,y)
         """
-        cmd, start_frame, nb_frames = self._export(start=start, nb_frames=nb_frames, end=end, scale=scale,
-                                                   step=step, stream=stream, crop=kwargs.get('crop', None))
-
+        cmd = self._export(start=start, nb_frames=nb_frames, end=end, scale=scale,
+                           step=step, stream=stream, crop=kwargs.get('crop', None))
+        
+        start_frame, nb_frames = self.frame_range
         # resolve name
         if out_name is None:
             out_name = osp.splitext(self.file)[0]
@@ -681,9 +655,9 @@ class FF():
         ffmpeg -i a.mp4 -force_key_frames 00:00:09,00:00:12 out.mp4
 
         """
-        cmd, start_frame, nb_frames = self._export(start=start, nb_frames=nb_frames, end=end, scale=scale,
-                                                   step=step, stream=stream, crop=kwargs.get('crop', None))
-
+        cmd = self._export(start=start, nb_frames=nb_frames, end=end, scale=scale,
+                           step=step, stream=stream, crop=kwargs.get('crop', None))
+        start_frame, nb_frames = self.frame_range
         # resolve name
         # TODO should be start_frames instead
         # nb_frames should be either frames or time
@@ -797,7 +771,8 @@ class FF():
 
         _fcmd = [self.ffmpeg, '-i', self.file]
 
-        _interval, start_frame, nb_frames = self.format_start_end(start, nb_frames, end)
+        _interval = self.format_start_end(start, nb_frames, end)
+        start_frame, nb_frames = self.frame_range
         _fcmd += _interval
         _fcmd += self.build_filter_graph(start_frame=start_frame, scale=scale, **kwargs)
         _fcmd += ['-start_number', str(start_frame), '-f', 'rawvideo', '-pix_fmt', 'rgb24']
