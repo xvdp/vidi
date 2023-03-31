@@ -90,6 +90,11 @@ class FF():
         _stats = videos[stream]
 
         self.stats = {'type': 'video', 'file': self.file}
+        self.stats['sar'] = 1.
+        if 'sample_aspect_ratio' in _stats and _stats['sample_aspect_ratio'] != '1:1':
+            _sar = [float(a) for a in (_stats['sample_aspect_ratio'].split(':')[0])]
+            self.stats['sar'] = _sar[0]/_sar[1]
+
 
         if 'width' in _stats and 'height'in _stats:
             self.stats['width'] = _stats['width']
@@ -221,22 +226,44 @@ class FF():
 
 
     def build_filter_graph(self,
-                           scale: float = 1.,
-                           step: int = 1,
+                           scale: Union[float, tuple] = 1.,
                            rate: Optional[float] = None,
                            crop: Optional[tuple[int,int,int,int]] = None,
                            subtitles: Optional[str] = None,
                            showframe: bool = False,
                            start_frame: int = 0,
+                           scale_aspect_ratio: int = 0,
                            **kwargs) -> list:
-        """ add filter graph to command"""
+        """ add filter graph to command -vf comma,sepparated,filters
+        Args
+            scale       (float, tuple [1])          -> scale=img_width*scale[0]:img_height*scale[1]
+            rate        (float [None])              -> fps=rate
+            crop        (tuple (w,h,x,y) [None])    -> crop=crop[0]:crop[1]}crop[2]:crop[3]
+            subtitles   (str) .srt subtitles file   -> subtitles=subtitles
+            showframe   (bool [False])              -> drawtext=text'%{n}'"
+            start_frame (int [0]) for 'showframe arg'
+                show_frame arg does not keep frames if when fast forwarding or rewinding
+            scale_aspect_ratio  (int [0])   scale aspect ratio to 1:1
+                if 1 scale[0] *= sar[0]/sar[1], if -1 scale[1] *= sar[1]/sar[0],
+
+        """
         out = []
         _vf = []
 
-        # deprectated
-        if scale != 1:
-            _vf += [f"scale={int(self.stats['width']*scale)}:{int(self.stats['height']*scale)}"]
-            print(_vf)
+        if not isinstance(scale, (list, tuple)):
+            scale = (scale, scale)
+        scale = list(scale)
+
+        if scale_aspect_ratio != 0 and self.stats['sar'] != 1.:
+            if scale_aspect_ratio > 0:
+                scale[0] *= self.stats['sar']
+            else:
+                scale[1] /= self.stats['sar']
+
+        if scale !=  [1.,1.]:
+            self.stats['out_width'] = int(round(scale[0] * self.stats['width']))
+            self.stats['out_height'] = int(round(scale[1] * self.stats['height']))
+            _vf += [f"scale={self.stats['out_width']}:{self.stats['out_height']}"]
 
         if rate is not None:
             _vf += [f"fps={rate}"]
@@ -315,7 +342,8 @@ class FF():
         Does not accept exct values
         cvlc --start-time=<seconds> --stop_time=<seconds> <fname> works better
         """
-        warnings.warn('.play()  cannont do exact time search, use .vlc() instead willd eprecate')
+        if start != 0:
+            warnings.warn('.play()  cannont do exact time search, use .vlc() instead')
         if not self.stats:
             self.get_video_stats(stream=kwargs.get('stream', 0))
 
@@ -327,22 +355,19 @@ class FF():
         if fullscreen:
             _fcmd += ["-fs"]
         _fcmd += ['-i', self.file]
-
-        _interval = self.format_start_end(start, nb_frames, end)
-        start_frame, nb_frames = self.frame_range
-        print(_interval, start_frame)
-        _fcmd += _interval
+        _fcmd += self.format_start_end(start, nb_frames, end)
 
         if 'subtitles' in kwargs and isinstance(kwargs['subtitles'], bool) and kwargs['subtitles']:
             _dirname, _fname = osp.split(osp.abspath(self.file))
             _fname, _ext = osp.splitext(_fname)
-            subtitles = [f.path for f in os.scandir(_dirname) if f.name.endswith(".srt") and f.name[:len(_fname)] == _fname]
+            subtitles = [f.path for f in os.scandir(_dirname)
+                         if f.name.endswith(".srt") and f.name[:len(_fname)] == _fname]
             if subtitles:
                 kwargs['subtitles'] = subtitles[0]
             else:
                 del kwargs['subtitles']
 
-        _fcmd += self.build_filter_graph(start_frame=start_frame, **kwargs)
+        _fcmd += self.build_filter_graph(start_frame=self.frame_range[0], **kwargs)
 
 
         print(" ".join(_fcmd))
@@ -456,7 +481,7 @@ class FF():
                 **kwargs) -> str:
         """ returns export command stub and start_frame
         Args
-            start       (int, float str) # float is interpreted as time, int as frame
+            start       (int, float, str) # float is interpreted as time, int as frame
             nb_frames   (int)   number of frames from start
             end         (int, float, str) overrides nb_frames 
         """
@@ -464,18 +489,16 @@ class FF():
             self.get_video_stats(stream=stream)
 
         _interval = self.format_start_end(start, nb_frames, end)
-        start_frame, nb_frames = self.frame_range
 
         cmd =  [self.ffmpeg, '-i', self.file] + _interval
-
-        cmd += self.build_filter_graph(start_frame=start_frame, **kwargs)
-
+        cmd += self.build_filter_graph(start_frame=self.frame_range[0], **kwargs)
         return cmd
+
 
     def anytime_to_frame_time(self,
                               in_time: Union[int, float, str],
                               fps: Optional[float] = None) -> tuple[int, float]:
-        """ seconds, time signature or frame to (frame time)
+        """ float seconds, HH:MM:SS.mmm str or int frame to (int frame, float seconds)
         Args
             in_time     (str 'HH:MM:SS.mmm', float, int)
             fps         (float)
@@ -550,13 +573,13 @@ class FF():
                       start: Union[int, float] = 0,
                       nb_frames: Optional[int] = None,
                       end: Union[int, float, str, None] = None,
-                      scale: float = 1.,
-                      step: int = 1,
+                      scale: Union[float, tuple[float, float]] = 1.,
                       stream: int = 0,
                       out_folder: str = None,
+                      scale_aspect_ratio: int = -1,
                       **kwargs) -> str:
         """ extract frames from video
-        TODO fix ffmpeg imprecision -ss TIMESTAMP starts at closest Iframe NOT exact time
+
         # show Iframes 
         ffprobe -select_streams v -show_frames -show_entries frame=pict_type -of csv $N | grep -n I
         # play vid at time # time doesnt match subtitles
@@ -567,54 +590,45 @@ class FF():
             start       (int|float [0])  float: time in seconds, int: frame number
             nb_frames   (int [None]):   default: to end of clip
             end         (int, float, str, None) overrides nb_frames
-            scale       (float [1]) rescale output
+            scale       (tuple float [1]) rescale output
             stream      (int [0]) if more than one stream in video
             out_folder  optional, save to folder
+            scale_aspect_ratio  (int, [-1]), 0, 1: if 'sample_aspect_ratio' in clip and not 1:1
+                default: [-1] scales extended dimension down, 1 scales shorter dimension up, 0 nothing
 
         kwargs
             out_format  (str) in (".png", ".jpg", ".bmp") format override
             crop        (list, tuple (w,h,x,y)
         """
         cmd = self._export(start=start, nb_frames=nb_frames, end=end, scale=scale,
-                           step=step, stream=stream, crop=kwargs.get('crop', None))
-        
+                           scale_aspect_ratio=scale_aspect_ratio,
+                           stream=stream, crop=kwargs.get('crop', None))
+
         start_frame, nb_frames = self.frame_range
+
         # resolve name
-        if out_name is None:
-            out_name = osp.splitext(self.file)[0]
-
+        out_name = out_name if out_name is not None else self.file
         out_name, out_format = osp.splitext(out_name)
-
-        if "out_format" in kwargs:
-            out_format = kwargs["out_format"]
-
+        out_format = kwargs.get('out_format', out_format)
         if out_format.lower() not in (".png", ".jpg", ".jpeg", ".bmp"):
             out_format = ".png"
 
-        if scale != 1:
-            _pad = ""
-            if "%0" in out_name:
-                out_name, _pad = out_name.split("%0")
-                if out_name[-1] == "_":
-                    out_name = out_name[:-1]
-                _pad = "_%0" + _pad
-            out_name += f"_{scale}" + _pad
+        if scale not in (1, (1, 1)):
+            out_name += f"_{'-'.join(scale)}" if isinstance(scale, (list,tuple)) else f"_{scale}"
 
-        if not "%0" in out_name:
-            out_name += "_" + self.stats['pad']
+        out_name = f"{out_name}_{self.stats['pad']}{out_format}"
 
-        out_name += out_format
         if out_folder is not None:
             out_folder = osp.abspath(out_folder)
             os.makedirs(out_folder, exist_ok=True)
-            out_name = osp.join(out_folder, out_name)
-
+            out_name = osp.join(out_folder, osp.basename(out_name))
         cmd.append(out_name)
+
         _msg = ["exporting", out_name%(start_frame)]
         if nb_frames > 1:
             _msg += ["to ", out_name%(start_frame + nb_frames)]
-
         print(*_msg, " ...")
+
         proc = sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE, stdout=sp.PIPE)
         proc.wait()
 
@@ -634,7 +648,7 @@ class FF():
                     start: Union[int, float, str] = 0,
                     nb_frames: Optional[int] = None,
                     end: Union[int, float, str, None] = None,
-                    scale: float = 1.,
+                    scale: Union[float, tuple[float, float]] = 1.,
                     step: int = 1,
                     stream: int = 0,
                     out_folder: str = None,
@@ -657,29 +671,28 @@ class FF():
         """
         cmd = self._export(start=start, nb_frames=nb_frames, end=end, scale=scale,
                            step=step, stream=stream, crop=kwargs.get('crop', None))
-        start_frame, nb_frames = self.frame_range
-        # resolve name
-        # TODO should be start_frames instead
-        # nb_frames should be either frames or time
+
+
+        _name, _format = osp.splitext(self.file)
+        out_format = None
         if out_name is None:
-            nb_frames = self.stats["nb_frames"] if nb_frames is None else nb_frames
-            out_name = f"{osp.splitext(self.file)[0]}_{start_frame}-{nb_frames+start_frame}"
+            start_frame, nb_frames = self.frame_range
+            out_name = f"{_name}_{start_frame}-{nb_frames+start_frame}"
+        else:
+            out_name, out_format = osp.splitext(out_name)
 
-        # format
-        out_name, out_format = osp.splitext(out_name)
-        if not out_format:
-            out_format = osp.splitext(self.file)[1]
-        if "out_format" in kwargs:
-            out_format = kwargs["out_format"]
+        out_format = kwargs.get('out_format', _format if out_format is None else out_format)
 
-        if scale != 1:
-            out_name += f"_{scale}"
+        if scale not in (1, (1, 1)):
+            out_name += f"_{'-'.join(scale)}" if isinstance(scale, (list,tuple)) else f"_{scale}"
 
-        out_name += out_format
+        out_name = f"{out_name}{out_format}"
+
         if out_folder is not None:
             out_folder = osp.abspath(out_folder)
             os.makedirs(out_folder, exist_ok=True)
-            out_name = osp.join(out_folder, out_name)
+            out_name = osp.join(out_folder, osp.basename(out_name))
+
 
         if osp.isfile(out_name):
             assert overwrite, "file exists set overwrite=True"
@@ -749,17 +762,18 @@ class FF():
                  start: Union[int, float, str] = 0,
                  nb_frames: Optional[int] = None,
                  end: Union[int, float, str, None] = None,
-                 scale: float = 1.,
+                 scale: Union[float, tuple] = 1.,
                  stream: int = 0,
                  step: int = 1,
                  dtype: np.dtype = np.uint8,
-                 memory_type: str = "CPU",
+                 scale_aspect_ratio: int = -1,
                  **kwargs) -> np.ndarray:
         """
         read video to numpy
         Args
             start       (int|float [0])  float: seconds, int: frame, str: HH:MM:SS.mmm
             nb_frames   (int [None]) None: all frames
+            end         (int, float, str, None) overrides nb_frames
             scale       (float [1])
             stream      (int [0]) video stream to load
             step        (int [1]) step thru video
@@ -770,37 +784,29 @@ class FF():
             self.get_video_stats(stream=stream)
 
         _fcmd = [self.ffmpeg, '-i', self.file]
-
-        _interval = self.format_start_end(start, nb_frames, end)
-        start_frame, nb_frames = self.frame_range
-        _fcmd += _interval
-        _fcmd += self.build_filter_graph(start_frame=start_frame, scale=scale, **kwargs)
-        _fcmd += ['-start_number', str(start_frame), '-f', 'rawvideo', '-pix_fmt', 'rgb24']
-
-
-        width = self.stats['width']
-        height = self.stats['height']
-        if scale != 1:
-            width = int(self.stats['width'] * scale)
-            height = int(self.stats['height'] * scale)
+        _fcmd += self.format_start_end(start, nb_frames, end)
+        _fcmd += self.build_filter_graph(start_frame=self.frame_range[0], scale=scale,
+                                         scale_aspect_ratio=scale_aspect_ratio, **kwargs)
+        _fcmd += ['-start_number', str(self.frame_range[0]), '-f', 'rawvideo', '-pix_fmt', 'rgb24']
+        _fcmd += ['pipe:']
 
         if 'crop' in kwargs:
-            crop = kwargs['crop']
-            width = crop[0] = crop[2]
-            height = crop[1] = crop[3]
-
-        _fcmd += ['pipe:']
+            width = kwargs['crop'][0]
+            height = kwargs['crop'][1]
+        else:
+            width = self.stats.get('out_width', self.stats['width'])
+            height = self.stats.get('out_hight', self.stats['height'])
 
         bufsize = width*height*3
 
-        nb_frames = self.fits_in_memory(nb_frames, dtype_size=np.dtype(dtype).itemsize, scale=scale,
-                                        stream=stream, memory_type=memory_type, step=step)
+        nb_frames = self.fits_in_memory(self.frame_range[1], dtype_size=np.dtype(dtype).itemsize,
+                                        scale=scale, stream=stream, memory_type='CPU', step=step)
 
-        to_frame = self.stats['nb_frames'] if nb_frames is None else min(self.stats['nb_frames'],
-                                                                          nb_frames + start_frame)
+        to_frame = min(self.stats['nb_frames'], nb_frames + self.frame_range[0])
 
         proc = sp.Popen(_fcmd, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, bufsize=bufsize)
-        out = self._to_numpy_proc(start_frame, to_frame, step, width, height, dtype, bufsize, proc)
+        out = self._to_numpy_proc(self.frame_range[0], to_frame, step, width, height, dtype,
+                                  bufsize, proc)
         proc.wait()
         proc.stdout.close()
 
