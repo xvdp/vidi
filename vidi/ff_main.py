@@ -55,6 +55,8 @@ class FF():
             self.get_video_stats()
         self.frame_range = []
 
+        self.fmts = get_formats()
+
 
     def get_video_stats(self,
                         stream: int = 0,
@@ -95,6 +97,7 @@ class FF():
             _sar = [float(a) for a in (_stats['sample_aspect_ratio'].split(':'))]
             self.stats['sar'] = _sar[0]/_sar[1]
 
+        self.stats['bpp'] = int(_stats['bits_per_raw_sample'])
 
         if 'width' in _stats and 'height'in _stats:
             self.stats['width'] = _stats['width']
@@ -764,12 +767,11 @@ class FF():
                  end: Union[int, float, str, None] = None,
                  scale: Union[float, tuple] = 1.,
                  stream: int = 0,
-                 step: int = 1,
-                 dtype: np.dtype = np.uint8,
                  scale_aspect_ratio: int = -1,
+                 to_rgb: bool = False,
                  **kwargs) -> np.ndarray:
         """
-        read video to numpy
+        read video to float numpy
         Args
             start       (int|float [0])  float: seconds, int: frame, str: HH:MM:SS.mmm
             nb_frames   (int [None]) None: all frames
@@ -778,17 +780,18 @@ class FF():
             stream      (int [0]) video stream to load
             step        (int [1]) step thru video
 
-        TODO check input depth bytes, will fail if not 24bpp
         """
         if not self.stats:
             self.get_video_stats(stream=stream)
+
+        pix_fmt = kwargs.get('pix_fmt', self.stats['pix_fmt'])
 
         _fcmd = [self.ffmpeg, '-i', self.file]
         _fcmd += self.format_start_end(start, nb_frames, end)
         _fcmd += self.build_filter_graph(start_frame=self.frame_range[0], scale=scale,
                                          scale_aspect_ratio=scale_aspect_ratio, **kwargs)
-        _fcmd += ['-start_number', str(self.frame_range[0]), '-f', 'rawvideo', '-pix_fmt', 'rgb24']
-        _fcmd += ['pipe:']
+        _fcmd += ['-start_number', str(self.frame_range[0]), '-f', 'rawvideo',
+                  '-pix_fmt', pix_fmt, 'pipe:']
 
         if 'crop' in kwargs:
             width = kwargs['crop'][0]
@@ -797,51 +800,470 @@ class FF():
             width = self.stats.get('out_width', self.stats['width'])
             height = self.stats.get('out_hight', self.stats['height'])
 
-        bufsize = width*height*3
+        bufsize = int(height*width*nb_frames*self.fmts[self.stats['pix_fmt']]['bpp']/8)
 
-        nb_frames = self.fits_in_memory(self.frame_range[1], dtype_size=np.dtype(dtype).itemsize,
-                                        scale=scale, stream=stream, memory_type='CPU', step=step)
-
-        to_frame = min(self.stats['nb_frames'], nb_frames + self.frame_range[0])
-
+        # TODO read frame by frame instead of whole chunk
         proc = sp.Popen(_fcmd, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, bufsize=bufsize)
-        out = self._to_numpy_proc(self.frame_range[0], to_frame, step, width, height, dtype,
-                                  bufsize, proc)
+        buffer = proc.stdout.read(bufsize)
+        proc.communicate()
         proc.wait()
         proc.stdout.close()
 
-        return out
-
-
-    def _to_numpy_proc(self,
-                       start: int,
-                       to_frame: int,
-                       step: int,
-                       width: int,
-                       height: int,
-                       dtype: np.dtype,
-                       bufsize: int,
-                       proc: sp.Popen) -> np.ndarray:
-        """ read nb_frames at step from open pipe return ndarray [N,H,W,C] 
-        """
         out = []
-        for i in range(start, to_frame):
-            if not i%step:
-                buffer = proc.stdout.read(bufsize)
-                if len(buffer) != bufsize:
-                    break
-                frame = np.frombuffer(buffer, dtype=np.uint8)
-                out += [frame.reshape(height, width, 3).astype(dtype)]
+        for i in range(nb_frames):
+            fro = i * bufsize//nb_frames
+            _to = (i + 1) * bufsize//nb_frames
+            frame = read_frame(buffer[fro:_to], self.stats['pix_fmt'], width, height)
+            out.append(frame)
 
-        out = out[0][None] if len(out) == 1 else np.stack(out, axis=0)
-
-        # TODO: this assumes that video input is uint8n: validate pixel format
-        if dtype in (np.float32, np.float64):
-            out /= 255.
-        del buffer
-
+        out = np.stack(out, axis=0)
+        if to_rgb and 'yuv' in self.stats['pix_fmt']:
+            if 'ayuv' in self.stats['pix_fmt']:
+                out[..., 1:] = yxx2rgb(out[..., 1:], clamp=True)
+            elif 'yuva' in self.stats['pix_fmt']:
+                out[..., :-1] = yxx2rgb(out[..., :-1], clamp=True)
+            else:
+                out =  yxx2rgb(out, clamp=True)
         return out
 
+    # @staticmethod
+    # def _format_bpp(pix_fmt: str) -> list(float):
+    #     bits = check_format(pix_fmt)
+    #     if bits is None:
+    #         raise NotImplementedError(f"pix_fmt {pix_fmt} not supported")
+    #     return bits
+
+    # def _to_numpy_proc(self,
+    #                    start: int,
+    #                    to_frame: int,
+    #                    step: int,
+    #                    width: int,
+    #                    height: int,
+    #                    dtype: np.dtype,
+    #                    bufsize: int,
+    #                    proc: sp.Popen) -> np.ndarray:
+    #     """ read nb_frames at step from open pipe return ndarray [N,H,W,C] 
+    #     """
+    #     out = []
+    #     for i in range(start, to_frame):
+    #         if not i%step:
+    #             buffer = proc.stdout.read(bufsize)
+    #             if len(buffer) != bufsize:
+    #                 break
+    #             frame = np.frombuffer(buffer, dtype=np.uint8)
+    #             out += [frame.reshape(height, width, 3).astype(dtype)]
+
+    #     out = out[0][None] if len(out) == 1 else np.stack(out, axis=0)
+
+    #     # TODO: this assumes that video input is uint8n: validate pixel format
+    #     if dtype in (np.float32, np.float64):
+    #         out /= 255.
+    #     del buffer
+
+    #     return out
+
+
+def yxx_matrix(mode: str, invert: bool = False) -> np.ndarray:
+    """ color conversion matrices
+    Args:
+        mode    (str) in (YUV_RGB_709, YCC_RGB_709, YCC_RGB_2020)
+        invert  (bool [False]) return inverse matrix
+    """
+    mat = {}
+    mat['YUV_RGB_709'] = np.array([[ 1.     ,  1.     ,  1.     ],
+                                   [ 0.     , -0.39465,  2.03211],
+                                   [ 1.13983, -0.5806 ,  0.     ]])
+    mat['YCC_RGB_709'] = np.array([[ 1.    ,  1.    ,  1.    ],
+                                   [ 0.    , -0.1873,  1.8556],
+                                   [ 1.5748, -0.4681,  0.    ]])
+    mat['YCC_RGB_2020'] = np.array([[ 1.        ,  1.        ,  1.        ],
+                                    [ 0.        , -0.16455313,  1.8814    ],
+                                    [ 1.4746    , -0.57135313,  0.        ]])
+
+    assert mode in mat, f"got {mode}, expected {list(mat.keys())}"
+    out = mat[mode]
+    if invert:
+        out = np.linalg.inv(out)
+    return out
+
+
+def rgb2yxx(rgb: np.ndarray, mode: str = 'YUV_RGB_709', clamp: bool = False) -> np.ndarray:
+    """ float rgb to yuv444 or ycc444
+    Args
+        rgb     (ndarray) shape (h,w,3) float
+        mode    (str [YUV_RGB_709]) color profile
+            (YUV_RGB_709, YCC_RGB_709, YCC_RGB_2020)
+        clamp   (bool [False]) clamp result to 0,1
+    """
+    mat = yxx_matrix(mode, True)
+    shape = rgb.shape
+    out = (rgb.reshape(-1,3) @ mat).reshape(shape)
+    out[..., 1] += 0.5
+    out[..., 2] += 0.5
+    if clamp:
+        out = np.clip(out, 0, 1)
+    return out
+
+
+def yxx2rgb(yuv: np.ndarray, mode: str = 'YUV_RGB_709', clamp: bool = False) -> np.ndarray:
+    """ float yuv444 or ycc444 to rgb
+    Args
+        yuv     (ndarray) shape (h,w,3) float
+        mode    (str [YUV_RGB_709]) color profile
+            (YUV_RGB_709, YCC_RGB_709, YCC_RGB_2020)
+        clamp   (bool [False]) clamp result to 0,1
+    """
+    mat = yxx_matrix(mode, False)
+    shape = yuv.shape
+    out = yuv.copy()
+    out[..., 1] -= 0.5
+    out[..., 2] -= 0.5
+    out = (out.reshape(-1,3) @ mat).reshape(shape)
+    if clamp:
+        out = np.clip(out, 0, 1)
+    return out
+
+
+def from_bits(x: np.ndarray, bits: int = 10, dtype: np.dtype = np.float32) -> np.ndarray:
+    """ uilt to float
+    Args
+        x       (ndarray)
+        bits    (int [10]) number of bits of input data
+        dtype   (dtype [np.float32])
+    """
+    return ( x/(2**bits-1)).astype(dtype)
+
+
+def to_bits(x: np.ndarray, bits: int = 10, dtype: np.dtype = np.uint16) -> np.ndarray:
+    """ float to uint
+    """
+    return( x*(2**bits-1)).astype(dtype)
+
+def read_bytes(data: Union[str, bytes]) -> bytes:
+    """ read binary file or pass thru bytes
+    Args
+        data    (str | bytes)
+    """
+    if isinstance(str, data):
+        assert osp.isfile(data), f'expected file or bytes, no file <{data}> found'
+        with open(data, mode="rb") as _fi:
+            data = _fi.read()
+    assert isinstance(data, bytes), f'expected file or bytes got {type(data)}'
+    return data
+
+def get_formats(supported: bool = True, unsupported: bool = False) -> dict:
+    """ return available ffmpeg patterns and if this reader supports them
+    """
+    _notin = ('bgr444', '555', '565', '_byte', 'bgr4', 'rgb444', '410')
+    _not = ('rgb4', 'bgr8', 'rgb8', 'rgb4')
+    _prefixes = ('rgb', 'bgr', 'arg', 'abg', 'yuv', 'ayu', '0rg', '0bg')
+    out = {}
+    with os.popen("ffprobe -v quiet -pix_fmts") as _fi:
+        _fmts = _fi.read().split("\n")
+    for _, _line in enumerate(_fmts[8:]):
+        _fmt = _line.split()
+        if len(_fmt) == 4:
+            _issupported = False
+            if not _fmt[1].endswith('be') and _fmt[1][:3] in _prefixes and \
+                _fmt[1] not in _not and all(n not in _fmt[1] for n in _notin):
+                _issupported = True
+            if ((_issupported and supported) or (not _issupported and unsupported)):
+                out[_fmt[1]] = {'flags':_fmt[0].replace('.', ''),
+                                'channels': int(_fmt[2]),
+                                'bpp': int(_fmt[3])}
+                if supported and unsupported:
+                    out[_fmt[1]]['supported'] = _issupported
+    return out
+
+
+# def pix_formats
+
+def check_format(pix_fmt: str) -> tuple:
+    """ return list of channels with bits
+    only littleendian formats supported
+    # TODO simplify fourcc parsing & add alpha channel position
+
+    A bit redundant except for the yuv compression: ffprobe -pix_fmts returns info.
+    """
+    _supported_formats = get_formats()
+
+    out = None
+    order = None
+    fourcc = None
+    if pix_fmt in _supported_formats:
+
+        _pix_fmt = pix_fmt
+        if _pix_fmt.endswith('le'):
+            _pix_fmt = _pix_fmt[:-2]
+
+        if '64' in _pix_fmt:
+            out = [16,16,16,16]
+            order = _pix_fmt.split('64')[0]
+        elif '48' in _pix_fmt:
+            out = [16,16,16]
+            order = _pix_fmt.split('48')[0]
+        elif _pix_fmt in ('rgb24', 'rgb0', '0rgb', 'bgr24', 'bgr0', '0bgr'):
+            order = 'rgb' if 'rgb' in _pix_fmt else 'bgr'
+            out = [8,8,8]
+        elif _pix_fmt in ('bgra', 'rgba', 'abgr', 'argb'):
+            order = _pix_fmt
+            out = [8,8,8,8]
+
+        elif _pix_fmt[:3] == 'yuv':
+            order = 'yuv'
+            bits = 8
+            components = 3
+            j = 1
+            if _pix_fmt[-j].isnumeric():
+                while _pix_fmt[-j].isnumeric():
+                    j += 1
+                bits = int(_pix_fmt[-j+1:])
+            _pix_fmt = _pix_fmt.split('yuv')[1]
+            if not _pix_fmt[0].isnumeric():
+                if _pix_fmt[0] == 'a':
+                    order += 'a'
+                    components += 1
+                _pix_fmt = _pix_fmt[1:]
+            if not _pix_fmt[:3].isnumeric():
+                raise NotImplementedError(f"format not implemented {pix_fmt}")
+            out = [bits*int(c)/4 for c in _pix_fmt[:3]]
+            fourcc = [int(c) for c in _pix_fmt[:3]]
+            if components == 4:
+                out = out + [bits]
+                fourcc = fourcc + [fourcc[0]]
+    return out, order, fourcc # this could be simpler fourcc == out*bits/4
+
+
+def read_frame(data: Union[str, bytes], pix_fmt: str, width: int, height: int,) -> np.ndarray:
+    data = read_bytes(data)
+    bits, order, fourcc = check_format(pix_fmt)
+    assert bits is not None, f"{pix_fmt} unsupported; use little endian, 3 or 4 channel rgb, rgb, yuv"
+
+    # bufsize = int(sum(bits))*width*height #*len(bits)  < _ this needs to be in before the pipe
+
+    bitdepth = int(bits[0])
+    channels = len(bits)
+    dtype = np.uint8 if np.ceil(np.log2(bitdepth)) == 3 else np.uint16
+    frame = np.frombuffer(data, dtype=dtype)
+    out = np.empty((height, width, channels), dtype=dtype)
+
+    if fourcc is not None:
+        return _expand_fourcc(frame, out, fourcc)
+    else:
+        _a0 = width * height
+        for i in range(len(fourcc)):
+            out[..., i]  = frame[i*_a0:(i+1)*_a0].reshape(height, width)
+    return from_bits(out, bitdepth, dtype=np.float32)
+
+def _expand_fourcc(frame:np.ndarray, out: np.ndarray, fourcc: tuple) -> np.ndarray:
+    """ yuv | yuva 444, 440, 422, 420, 410 -> 444
+    """
+    height, width, channels = out.shape
+
+    _area_ratio = sum(fourcc[1:3])/(fourcc[0]*2)
+    _width_ratio = fourcc[1]/fourcc[0]
+    _height_ratio = _area_ratio/_width_ratio
+
+    _area = width * height
+    _area_uv = int(_area_ratio * _area)
+    _width_uv = int(_width_ratio * width)
+    _height_uv =  int(_height_ratio * height)
+    _expand_w = int(1/_width_ratio)
+    _expand_h = int(1/_height_ratio)
+
+    _address = np.cumsum([_area, _area_uv, _area_uv])
+
+    out[..., 0] = frame[:_area].reshape(height, width)
+
+    for i in range(0, 2):
+        data = frame[_address[i]:_address[i+1]].reshape(_height_uv, _width_uv)
+        out[..., i+1] = data.repeat(_expand_w, axis=-1).repeat(_expand_h, axis=-2)
+    if channels == 4:
+        out[..., 3] = frame[_address[-1]:].reshape(height, width)
+    return out
+
+# def check_format(pix_fmt: str) -> list[float]:
+#     """ return list of channels with bits
+#     only littleendian formats supported
+#     ['abgr', 'argb', 'ayuv64le', 'bgr0', 'bgr24', 'bgr48le', 'bgra', 'bgra64le', 'rgb0', 'rgb24',
+#     'rgb48le', 'rgba', 'rgba64le', 'yuv410p', 'yuv411p', 'yuv420p', 'yuv420p10le', 'yuv420p12le',
+#     'yuv420p14le', 'yuv420p16le', 'yuv420p9le', 'yuv422p', 'yuv422p10le', 'yuv422p12le',
+#     'yuv422p14le', 'yuv422p16le', 'yuv422p9le', 'yuv440p', 'yuv440p10le', 'yuv440p12le', 'yuv444p',
+#     'yuv444p10le', 'yuv444p12le', 'yuv444p14le', 'yuv444p16le', 'yuv444p9le', 'yuva420p',
+#     'yuva420p10le', 'yuva420p16le', 'yuva420p9le', 'yuva422p', 'yuva422p10le', 'yuva422p12le',
+#     'yuva422p16le', 'yuva422p9le', 'yuva444p', 'yuva444p10le', 'yuva444p12le', 'yuva444p16le',
+#     'yuva444p9le', 'yuvj411p', 'yuvj420p', 'yuvj422p', 'yuvj440p', 'yuvj444p']
+#     """
+#     out = None
+#     if not pix_fmt.endswith('be')  and pix_fmt[:3] in ('rgb', 'bgr', 'arg', 'abg', 'yuv', 'ayu'):
+
+#         _pix_fmt = pix_fmt
+#         if _pix_fmt.endswith('le'):
+#             _pix_fmt = _pix_fmt[:-2]
+
+#         if '64' in _pix_fmt:
+#             out = [16,16,16,16]
+#         elif '48' in _pix_fmt:
+#             out = [16,16,16]
+#         elif _pix_fmt in ('rgb24', 'rgb0', 'rgb0', 'bgr24', 'bgr0', '0bgr'):
+#             out = [8,8,8]
+#         elif _pix_fmt in ('bgra', 'rgba', 'abgr', 'argb'):
+#             out = [8,8,8,8]
+
+#         elif _pix_fmt[:3] == 'yuv':
+#             bits = 8
+#             components = 3
+#             j = 1
+#             if _pix_fmt[-j].isnumeric():
+#                 while _pix_fmt[-j].isnumeric():
+#                     j += 1
+#                 bits = int(_pix_fmt[-j+1:])
+#             _pix_fmt = _pix_fmt.split('yuv')[1]
+#             if not _pix_fmt[0].isnumeric():
+#                 if _pix_fmt[0] == 'a':
+#                     components += 1
+#                 _pix_fmt = _pix_fmt[1:]
+#             if not _pix_fmt[:3].isnumeric():
+#                 raise NotImplementedError(f"format not implemented {pix_fmt}")
+#             out = [bits*int(c)/4 for c in _pix_fmt[:3]]
+#             if components == 4:
+#                 out = [bits] + out
+#     return out
+
+
+
+# def read_yuv(yuv: Union[str, bytes], width: int, height: int, fmt: str) -> np.ndarray:
+#     """ convert yuv422 10bit yuv file or bytes to ndarray
+#     Args:
+#         fname   (str or bytes) .yuv 422 file or buffer
+#         width   (int) expected frame width
+#         height  (int) expected frame height
+#         fmt     (str)
+#     """
+#     yuv = read_bytes(yuv)
+#     if fmt.endswith('be'), "big endian formats "
+#     # if ('10le' in fmt or '12le' in fmt or '14')
+#     dtype = np.uint8 
+#     frame = np.frombuffer(yuv, dtype=np.uint16)
+#     return _expand_422(frame, width, height)
+
+
+# def read_yuv42210le(yuv: Union[str, bytes], width=4448, height=3096) -> np.ndarray:
+#     """ convert yuv422 10bit yuv file or bytes to ndarray
+#     Args:
+#         fname   (str or bytes) .yuv 422 file or buffer
+#         width   (int) expected frame width
+#         height  (int) expected frame height
+#     """
+#     yuv = read_bytes(yuv)
+#     frame = np.frombuffer(yuv, dtype=np.uint16)
+#     return _expand_422(frame, width, height)
+
+
+# def read_yuv420p(yuv:  Union[str, bytes], width: int, height: int) -> np.ndarray:
+#     """ convert y420p 8bit .yuv file to ndarray
+#     Args:
+#         yuv     (str or bytes) .yuv 420 file or buffer
+#         width   (int) expected frame width
+#         height  (int) expected frame height
+#     """
+#     yuv = read_bytes(yuv)
+#     frame = np.frombuffer(yuv, dtype=np.uint8)
+#     return _expand_420(frame, width, height)
+
+
+# def read_yuv440p(yuv:  Union[str, bytes], width: int, height: int) -> np.ndarray:
+#     """ convert y420p 8bit .yuv file to ndarray
+#     Args:
+#         yuv     (str or bytes) .yuv 420 file or buffer
+#         width   (int) expected frame width
+#         height  (int) expected frame height
+#     """
+#     yuv = read_bytes(yuv)
+#     frame = np.frombuffer(yuv, dtype=np.uint8)
+#     return _expand_440(frame, width, height)
+
+
+# def _expand_440(frame:np.ndarray, width: int, height: int) -> np.ndarray:
+#     """ expand flat yuv422 data to yuv444 (w,h,3) """
+#     out = np.empty((height, width, 3), dtype=frame.dtype)
+#     _area = frame.shape[0]//2
+#     out[..., 0] = frame[:_area].reshape(height, width)
+#     out[..., 1] = frame[_area:(3*_area)//2].reshape(height, width//2).repeat(2, axis=-1)
+#     out[..., 2] = frame[(3*_area)//2:].reshape(height, width//2).repeat(2, axis=-1)
+#     return out
+
+# def _expand_422(frame:np.ndarray, width: int, height: int) -> np.ndarray:
+#     """ expand flat yuv422 data to yuv444 (w,h,3) """
+#     out = np.empty((height, width, 3), dtype=frame.dtype)
+#     _area = int(frame.shape[0]//2)
+#     out[..., 0] = frame[:_area].reshape(height, width)
+#     out[..., 1] = frame[_area:(3*_area)//2].reshape(height, width//2).repeat(2, axis=1)
+#     out[..., 2] = frame[(3*_area)//2:].reshape(height, width//2).repeat(2, axis=1)
+#     return out
+
+
+# def _expand_420(frame:np.ndarray, width: int, height: int) -> np.ndarray:
+#     """ expand flat yuv420 data to yuv444 (w,h,3)
+#     """
+#     out = np.empty((height, width, 3), dtype=frame.dtype)
+#     _area = int(frame.shape[0]//1.5)
+#     out[..., 0] = frame[:_area].reshape(height, width)
+#     out[..., 1] = frame[_area:_area + _area//4].reshape(height//2, width//2).repeat(2, axis=-2).repeat(2, axis=-1)
+#     out[..., 2] = frame[_area + _area//4:].reshape(height//2, width//2).repeat(2, axis=-2).repeat(2, axis=-1)
+#     return out
+
+
+
+
+# def yuv422p10le_to_float(raw_data, width):
+#     # Step 1: Read the raw video data from the pipe as bytes.
+#     # raw_data = proc.communicate()[0]
+
+#     # Step 2: Convert the bytes to a 1-dimensional NumPy array of unsigned integers.
+#     yuv = np.frombuffer(raw_data, dtype=np.uint16)
+
+#     # Step 3: Reshape the array to have the appropriate dimensions for the video frames.
+#     yuv = yuv.reshape(-1, 2, width, 2).transpose((0, 2, 1, 3))
+
+#     # Step 4: Convert the YUV color space to RGB color space.
+#     yuv = yuv.astype(np.float32)
+#     y = yuv[..., 0]
+#     u = yuv[..., 1] - 512
+#     v = yuv[..., 3] - 512
+#     r = y + 1.13983*v
+#     g = y - 0.39465*u - 0.58060*v
+#     b = y + 2.03211*u
+#     rgb = np.stack([r, g, b], axis=-1)
+#     rgb = np.clip(rgb, 0, 1023) / 1023
+
+#     # Step 5: Convert the resulting RGB values to float in the range of 0 to 1.
+#     rgb = rgb.astype(np.float32)
+#     rgb = rgb / 1023.0
+
+#     return rgb
+
+# def yuv2rgb(yuv_image):
+#     """Converts a YUV image to RGB color space.
+
+#     Args:
+#         yuv_image (numpy.ndarray): A numpy array representing the YUV image.
+
+#     Returns:
+#         numpy.ndarray: A numpy array representing the RGB image.
+
+#         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_YUV2RGB_J420)
+#         rgb_frame = skimage.color.yuv2rgb(frame)
+#     """
+#     y = yuv_image[..., 0]
+#     u = yuv_image[..., 1]
+#     v = yuv_image[..., 2]
+
+#     r = y + 1.13983 * v
+#     g = y - 0.39465 * u - 0.5806 * v
+#     b = y + 2.03211 * u
+
+#     return np.dstack([r, g, b])
 
 
 
@@ -920,3 +1342,20 @@ class FF():
 # #optimize gif export: generate palette / doesnt really work...
 # ffmpeg -y -i INPUT -vf palettegen palette.png
 # ffmpeg -y -i INPUT -i palette.png -filter_complex paletteuse OUT.gif
+
+
+# def tenbitread(f):
+#     ''' Generate 10 bit (unsigned) integers from a binary file '''
+#     while True:
+#         b = f.read(5)
+#         if not len(b):
+#             break
+#         n = int.from_bytes(b, 'little')
+#         #Split n into 4 10 bit integers
+#         yield n & 0x3ff
+#         n >>= 10
+#         yield n & 0x3ff
+#         n >>= 10
+#         yield n & 0x3ff
+#         n >>= 10
+#         yield n
