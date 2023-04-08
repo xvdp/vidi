@@ -1,7 +1,11 @@
 """@xvdp
 File to handle ffmpeg requests
+
+torch.set_default_dtype(torch.float16)
+torch.get_default_dtype()
+
 """
-from typing import Union, Optional
+from typing import Union, Optional, Callable
 import warnings
 import os
 import os.path as osp
@@ -9,11 +13,18 @@ import subprocess as sp
 import platform
 import json
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
+import torch
+from torch import Tensor
 
 
 from .utils import Col, CPUse, GPUse
 from .io_main import IO
+
+# pylint: disable=no-member
+# pylint: disable=invalid-name
+# pylint: disable=suppressed-message
 
 class FF():
     """wrapper class to ffmpeg, ffprobe, ffplay
@@ -43,7 +54,9 @@ class FF():
     V.export_clip(start='00:03:47.933', end='00:03:48.933', overwrite=True)
          -> at fps=30. is identical
     """
-    def __init__(self, fname: Optional[str] = None) -> None:
+    def __init__(self, fname: str) -> None:
+
+        assert osp.isfile(fname), f"video not found{fname}"
 
         self.ffplay = 'ffplay'
         self.ffmpeg = 'ffmpeg'
@@ -51,10 +64,8 @@ class FF():
         self.stats = {}
         self._io = IO()
         self.file = fname
-        if fname is not None and osp.isfile(fname):
-            self.get_video_stats()
+        self.get_video_stats()
         self.frame_range = []
-
         self.fmts = get_formats()
 
 
@@ -109,7 +120,7 @@ class FF():
                 self.stats['width'] = _stats['height']
                 self.stats['height'] = _stats['width']
         else:
-            warnings.warn("'width' or 'height' not found in stats setting to 1080p or fix code") 
+            warnings.warn("'width' or 'height' not found in stats setting to 1080p or fix code")
             self.stats['width'] = 1920
             self.stats['height'] = 1080
 
@@ -263,6 +274,8 @@ class FF():
             else:
                 scale[1] /= self.stats['sar']
 
+        self.stats['out_width'] = self.stats['width']
+        self.stats['out_height'] = self.stats['height']
         if scale !=  [1.,1.]:
             self.stats['out_width'] = int(round(scale[0] * self.stats['width']))
             self.stats['out_height'] = int(round(scale[1] * self.stats['height']))
@@ -760,6 +773,18 @@ class FF():
             plt.axis(kwargs['axis'])
         plt.show()
 
+    def _get_bufsize(self,
+                     bits: tuple,
+                     nb_frames: int = 1,
+                     crop: Optional[tuple[int,int,int,int]] = None) -> int:
+        if crop is not None:
+            self.stats['out_width'] = crop[0]
+            self.stats['out_height'] = crop[1]
+        _fmt_byte_depth =  np.ceil(bits[0]/8)
+        _fmt_planes = sum(bits)/bits[0]
+        _area = self.stats['out_height'] * self.stats['out_width']
+        return int(_area * nb_frames* _fmt_byte_depth * _fmt_planes)
+
 
     def to_numpy(self,
                  start: Union[int, float, str] = 0,
@@ -769,6 +794,9 @@ class FF():
                  stream: int = 0,
                  scale_aspect_ratio: int = -1,
                  to_rgb: bool = False,
+                 crop: Optional[tuple[int,int,int,int]] = None,
+                 compressed: bool = False,
+                 dtype: Union[str, np.dtype, None] = np.float32,
                  **kwargs) -> np.ndarray:
         """
         read video to float numpy
@@ -783,9 +811,18 @@ class FF():
         """
         if not self.stats:
             self.get_video_stats(stream=stream)
+        if compressed and to_rgb:
+            warnings.warn("Cannot output compressed 'rgb' type")
+            compressed = False
 
         pix_fmt = kwargs.get('pix_fmt', self.stats['pix_fmt'])
-
+        assert pix_fmt in self.fmts, f"pix_fmt {pix_fmt} not in:  {sorted(self.fmts.keys())}"
+        channel_axis = kwargs.get('channel_axis', -1)
+        _transpose = False
+        if to_rgb and 'yuv' in pix_fmt and channel_axis != -1:
+            channel_axis = -1
+            _transpose = True
+ 
         _fcmd = [self.ffmpeg, '-i', self.file]
         _fcmd += self.format_start_end(start, nb_frames, end)
         _fcmd += self.build_filter_graph(start_frame=self.frame_range[0], scale=scale,
@@ -793,14 +830,9 @@ class FF():
         _fcmd += ['-start_number', str(self.frame_range[0]), '-f', 'rawvideo',
                   '-pix_fmt', pix_fmt, 'pipe:']
 
-        if 'crop' in kwargs:
-            width = kwargs['crop'][0]
-            height = kwargs['crop'][1]
-        else:
-            width = self.stats.get('out_width', self.stats['width'])
-            height = self.stats.get('out_hight', self.stats['height'])
-
-        bufsize = int(height*width*nb_frames*self.fmts[self.stats['pix_fmt']]['bpp']/8)
+        nb_frames = self.frame_range[1]
+        bits, *_ = check_format(pix_fmt)
+        bufsize = self._get_bufsize(bits, nb_frames=nb_frames, crop=crop)
 
         # TODO read frame by frame instead of whole chunk
         proc = sp.Popen(_fcmd, stdin=sp.PIPE, stdout=sp.PIPE, stderr=sp.PIPE, bufsize=bufsize)
@@ -810,60 +842,181 @@ class FF():
         proc.stdout.close()
 
         out = []
+
         for i in range(nb_frames):
             fro = i * bufsize//nb_frames
             _to = (i + 1) * bufsize//nb_frames
-            frame = read_frame(buffer[fro:_to], self.stats['pix_fmt'], width, height)
+            frame = read_frame(buffer[fro:_to], pix_fmt, self.stats['out_width'],
+                               self.stats['out_height'], channel_axis,
+                               kwargs.get('interpolation', 1), compressed,
+                               to_rgb, dtype)
             out.append(frame)
+        del buffer
 
-        out = np.stack(out, axis=0)
-        if to_rgb and 'yuv' in self.stats['pix_fmt']:
-            if 'ayuv' in self.stats['pix_fmt']:
-                out[..., 1:] = yxx2rgb(out[..., 1:], clamp=True)
-            elif 'yuva' in self.stats['pix_fmt']:
-                out[..., :-1] = yxx2rgb(out[..., :-1], clamp=True)
-            else:
-                out =  yxx2rgb(out, clamp=True)
+        # output stack
+        if isinstance(out[0], np.ndarray):
+            out = np.stack(out, axis=0)
+            if _transpose:
+                out = out.transpose(0,3,1,2).copy(order='C')
+
         return out
 
-    # @staticmethod
-    # def _format_bpp(pix_fmt: str) -> list(float):
-    #     bits = check_format(pix_fmt)
-    #     if bits is None:
-    #         raise NotImplementedError(f"pix_fmt {pix_fmt} not supported")
-    #     return bits
 
-    # def _to_numpy_proc(self,
-    #                    start: int,
-    #                    to_frame: int,
-    #                    step: int,
-    #                    width: int,
-    #                    height: int,
-    #                    dtype: np.dtype,
-    #                    bufsize: int,
-    #                    proc: sp.Popen) -> np.ndarray:
-    #     """ read nb_frames at step from open pipe return ndarray [N,H,W,C] 
-    #     """
-    #     out = []
-    #     for i in range(start, to_frame):
-    #         if not i%step:
-    #             buffer = proc.stdout.read(bufsize)
-    #             if len(buffer) != bufsize:
-    #                 break
-    #             frame = np.frombuffer(buffer, dtype=np.uint8)
-    #             out += [frame.reshape(height, width, 3).astype(dtype)]
+class FFDataset(FF):
+    """"""
+    def __init__(self,
+                 fname: str,
+                 start: Union[int, float, str] = 0,
+                 nb_frames: Optional[int] = None,
+                 end: Union[int, float, str, None] = None,
+                 scale: Union[float, tuple] = 1.,
+                 scale_aspect_ratio: int = 0,
+                 crop: Optional[tuple[int,int,int,int]] = None,
+                 transforms: Optional[Callable] = None,
+                 compressed: bool = False,
+                 device: str = 'cpu',
+                 to_rgb: bool = False,
+                 **kwargs) -> None:
+        super().__init__(fname)
 
-    #     out = out[0][None] if len(out) == 1 else np.stack(out, axis=0)
+        self._cmd = None
+        self._pipe = None
+        self._bufsize = None
 
-    #     # TODO: this assumes that video input is uint8n: validate pixel format
-    #     if dtype in (np.float32, np.float64):
-    #         out /= 255.
-    #     del buffer
+        self._start =start
+        self._nb_frames = nb_frames
+        self._end = end
+        self.scale = scale
+        self.scale_aspect_ratio = scale_aspect_ratio
+        self.crop = crop
+        self.compressed = compressed
+        self.to_rgb = to_rgb
 
-    #     return out
+        self.ttransform = transforms
+        self.framecount = 0
+        self.device = device
+        self.dtype = kwargs.get('dtype', torch.get_default_dtype())
+
+        self.pix_fmt = self._out_format(**kwargs)
+        self.build_cmd()
 
 
-def yxx_matrix(mode: str, invert: bool = False) -> np.ndarray:
+    def __enter__(self):
+        self.open()
+        return self
+
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+
+    def __len__(self) -> int:
+        return self.frame_range[1]
+
+
+    def __getitem__(self, i: int = 1) -> Optional[Tensor]:
+        """ i can be used for ad hoc seek
+            reads from buffer
+            applies pil transforms
+            applies numpy transforms
+            applies torch transforms
+        """
+        if self._pipe is None or i is None or not i:
+            return None
+        buffer = self._pipe.stdout.read(self._bufsize)
+
+        channel_axis = 0
+        _transpose = False
+        if self.to_rgb and 'yuv' in self.pix_fmt:
+            channel_axis = -1
+            _transpose = True
+
+        data = read_frame(buffer, self.pix_fmt, self.stats['out_width'],
+                          self.stats['out_height'], channel_axis=channel_axis,
+                          interpolation=1, compressed=self.compressed,
+                          to_rgb=self.to_rgb, dtype=np.float32)[None]
+
+
+        if isinstance(data, np.ndarray):
+            data = torch.as_tensor(data, device=self.device, dtype=self.dtype)
+            if _transpose:
+                data = data.permute(0,3,1,2).contiguous()
+            if self.ttransform is not None:
+                data = self.ttransform(data)
+        else:
+            data = [torch.as_tensor(d, device=self.device, dtype=self.dtype)
+                    for d in data]
+
+        self.framecount += 1
+        if self.framecount >= self.frame_range[-1]:
+            self.close()
+        return data
+
+
+    def open(self) -> None:
+        """ manual overwrite to with ... __enter__
+        """
+        if self._pipe is not None:
+            self.close()
+        if self._cmd is None:
+            self.build_cmd()
+        self._pipe = sp.Popen(self._cmd, stdout=sp.PIPE, bufsize=self._bufsize)
+
+
+    def close(self) -> None:
+        """ manual overwrite to with ... __exit__
+        """
+        if self._pipe is not None and not self._pipe.stdout.closed:
+            self._pipe.stdout.flush()
+            self._pipe.stdout.close()
+            self._pipe.terminate()
+        if self._pipe is not None and not self._pipe.stdout.closed:
+            sp.run(['pkill', '-x', 'ffmpeg'], check=True) # this looks bad
+        self._pipe = None
+        print(f"Closing datast on {self.file} after {self.framecount} frames")
+        self.framecount = 0
+
+
+    def _out_format(self, **kwargs):
+        """ auto expand format using ffmpeg
+        """
+        if 'pix_fmt' in kwargs:
+            return kwargs['pix_fmt']
+        pix_fmt = self.stats['pix_fmt']
+        if not self.compressed:
+            for _4cc in ('440', '422', '420', '411', '410'):
+                if _4cc in pix_fmt:
+                    pix_fmt = pix_fmt.replace(_4cc, '444')
+                    break
+        return pix_fmt
+
+
+    def _process_kwargs(self, **kwargs):
+        for key, val in kwargs.items():
+            if key in ('pix_fmt', 'start', 'nb_frames', 'end', 'scale',
+                       'scale_aspect_ratio', 'crop'):
+                self.__dict__[key] = val
+
+
+    def build_cmd(self, **kwargs):
+        """ builds ffmpeg commant
+        """
+        self._process_kwargs(**kwargs)
+        self._cmd = ['ffmpeg', "-i", self.file]
+        self._cmd += self.format_start_end(self._start, self._nb_frames, self._end)
+        self._cmd += self.build_filter_graph(scale=self.scale,
+                                             scale_aspect_ratio=self.scale_aspect_ratio,
+                                             crop=self.crop)
+        self._cmd += ['-start_number', str(self.frame_range[0]), 
+                      "-f", "image2pipe", "-pix_fmt", self.pix_fmt, "-vcodec", "rawvideo", "-"]
+                    #   '-f', 'rawvideo',
+                    #   '-pix_fmt', self.pix_fmt, 'pipe:']
+
+        bits, *_ = check_format(self.pix_fmt)
+        self._bufsize = self._get_bufsize(bits, nb_frames=1, crop=self.crop)
+
+
+def yxx_matrix(mode: str, invert: bool = False, dtype: np.dtype = np.float32) -> np.ndarray:
     """ color conversion matrices
     Args:
         mode    (str) in (YUV_RGB_709, YCC_RGB_709, YCC_RGB_2020)
@@ -872,13 +1025,13 @@ def yxx_matrix(mode: str, invert: bool = False) -> np.ndarray:
     mat = {}
     mat['YUV_RGB_709'] = np.array([[ 1.     ,  1.     ,  1.     ],
                                    [ 0.     , -0.39465,  2.03211],
-                                   [ 1.13983, -0.5806 ,  0.     ]])
+                                   [ 1.13983, -0.5806 ,  0.     ]], dtype=dtype)
     mat['YCC_RGB_709'] = np.array([[ 1.    ,  1.    ,  1.    ],
                                    [ 0.    , -0.1873,  1.8556],
-                                   [ 1.5748, -0.4681,  0.    ]])
+                                   [ 1.5748, -0.4681,  0.    ]], dtype=dtype)
     mat['YCC_RGB_2020'] = np.array([[ 1.        ,  1.        ,  1.        ],
                                     [ 0.        , -0.16455313,  1.8814    ],
-                                    [ 1.4746    , -0.57135313,  0.        ]])
+                                    [ 1.4746    , -0.57135313,  0.        ]], dtype=dtype)
 
     assert mode in mat, f"got {mode}, expected {list(mat.keys())}"
     out = mat[mode]
@@ -895,7 +1048,7 @@ def rgb2yxx(rgb: np.ndarray, mode: str = 'YUV_RGB_709', clamp: bool = False) -> 
             (YUV_RGB_709, YCC_RGB_709, YCC_RGB_2020)
         clamp   (bool [False]) clamp result to 0,1
     """
-    mat = yxx_matrix(mode, True)
+    mat = yxx_matrix(mode, True, dtype=rgb.dtype)
     shape = rgb.shape
     out = (rgb.reshape(-1,3) @ mat).reshape(shape)
     out[..., 1] += 0.5
@@ -913,7 +1066,7 @@ def yxx2rgb(yuv: np.ndarray, mode: str = 'YUV_RGB_709', clamp: bool = False) -> 
             (YUV_RGB_709, YCC_RGB_709, YCC_RGB_2020)
         clamp   (bool [False]) clamp result to 0,1
     """
-    mat = yxx_matrix(mode, False)
+    mat = yxx_matrix(mode, False, dtype=yuv.dtype)
     shape = yuv.shape
     out = yuv.copy()
     out[..., 1] -= 0.5
@@ -924,14 +1077,21 @@ def yxx2rgb(yuv: np.ndarray, mode: str = 'YUV_RGB_709', clamp: bool = False) -> 
     return out
 
 
-def from_bits(x: np.ndarray, bits: int = 10, dtype: np.dtype = np.float32) -> np.ndarray:
+def from_bits(x: Union[list, np.ndarray],
+              bits: int = 10,
+              dtype: np.dtype = np.float32) -> np.ndarray:
     """ uilt to float
     Args
         x       (ndarray)
         bits    (int [10]) number of bits of input data
         dtype   (dtype [np.float32])
     """
-    return ( x/(2**bits-1)).astype(dtype)
+    if isinstance(x, np.ndarray):
+        return  (x/(2**bits-1)).astype(dtype)
+
+    for i, y in enumerate(x):
+        x[i] = from_bits(y, bits, dtype)
+    return x
 
 
 def to_bits(x: np.ndarray, bits: int = 10, dtype: np.dtype = np.uint16) -> np.ndarray:
@@ -939,17 +1099,19 @@ def to_bits(x: np.ndarray, bits: int = 10, dtype: np.dtype = np.uint16) -> np.nd
     """
     return( x*(2**bits-1)).astype(dtype)
 
+
 def read_bytes(data: Union[str, bytes]) -> bytes:
     """ read binary file or pass thru bytes
     Args
         data    (str | bytes)
     """
-    if isinstance(str, data):
+    if isinstance(data, str):
         assert osp.isfile(data), f'expected file or bytes, no file <{data}> found'
         with open(data, mode="rb") as _fi:
             data = _fi.read()
     assert isinstance(data, bytes), f'expected file or bytes got {type(data)}'
     return data
+
 
 def get_formats(supported: bool = True, unsupported: bool = False) -> dict:
     """ return available ffmpeg patterns and if this reader supports them
@@ -1034,31 +1196,82 @@ def check_format(pix_fmt: str) -> tuple:
     return out, order, fourcc # this could be simpler fourcc == out*bits/4
 
 
-def read_frame(data: Union[str, bytes], pix_fmt: str, width: int, height: int,) -> np.ndarray:
-    data = read_bytes(data)
-    bits, order, fourcc = check_format(pix_fmt)
-    assert bits is not None, f"{pix_fmt} unsupported; use little endian, 3 or 4 channel rgb, rgb, yuv"
+def read_frame(buffer: Union[str, bytes],
+               pix_fmt: str,
+               width: int,
+               height: int,
+               channel_axis = -1,
+               interpolation: int = 1,
+               compressed: bool = False,
+               to_rgb: bool = False,
+               dtype: Union[str, np.dtype, None] = np.float32) -> Union[np.ndarray, list]:
+    """ bytes to ndarray ofor a single frame
 
-    # bufsize = int(sum(bits))*width*height #*len(bits)  < _ this needs to be in before the pipe
+    Args
+        buffer  (str, bytes)    length of data needs to correspond to pix_fmt data packing
+        pix_fmt (str) little endian pix_fmt supported by ffmpeg in (rgb, bgr)/a or yuv/a fourcc
+            run .get_formats() to see currently implemented formats
+        width   (int) expected width
+        height  (int) expected out
+        interploation (int) 0 NEAR, 1 LINEAR, 2 CUBIC 4 LANCZOS
+        compressed      (bool [False]) for fourcc codecs, keep compression: returns list
+    """
+    buffer = read_bytes(buffer)
+    bits, _, fourcc = check_format(pix_fmt)
+    assert bits is not None, f"{pix_fmt} unsupported; use little endian, (rgb, rgb, yuv)(a)"
 
-    bitdepth = int(bits[0])
+    bitdepth = int(bits[0]) # will this be wrong for scaling bits?
     channels = len(bits)
-    dtype = np.uint8 if np.ceil(np.log2(bitdepth)) == 3 else np.uint16
-    frame = np.frombuffer(data, dtype=dtype)
-    out = np.empty((height, width, channels), dtype=dtype)
+    _dtype = np.uint8 if np.ceil(np.log2(bitdepth)) == 3 else np.uint16
+    frame = np.frombuffer(buffer, dtype=_dtype)
+
 
     if fourcc is not None:
-        return _expand_fourcc(frame, out, fourcc)
+        shape = (channels, height, width) if channel_axis == 0 else (height, width, channels)
+        out =  _expand_fourcc(frame, fourcc, shape, interpolation, channel_axis, compressed)
     else:
+        out = []
         _a0 = width * height
-        for i in range(len(fourcc)):
-            out[..., i]  = frame[i*_a0:(i+1)*_a0].reshape(height, width)
-    return from_bits(out, bitdepth, dtype=np.float32)
+        for i in range(channels):
+            out.append(frame[i*_a0:(i+1)*_a0].reshape(height, width))
+    if not compressed or all([out[0].shape == _a.shape for _a in out[1:]]):
+        out = np.stack(out, axis=channel_axis)
 
-def _expand_fourcc(frame:np.ndarray, out: np.ndarray, fourcc: tuple) -> np.ndarray:
-    """ yuv | yuva 444, 440, 422, 420, 410 -> 444
+    # convert to float in (0,1) range
+    if dtype is not None or (to_rgb and 'yuv' in pix_fmt):
+        dtype = dtype or np.float32
+        out = from_bits(out, int(bits[0]), dtype=dtype)
+
+    if isinstance(out, np.ndarray) and (to_rgb and 'yuv' in pix_fmt):
+        if 'ayuv' in pix_fmt:
+            out[..., 1:] = yxx2rgb(out[..., 1:], clamp=True)
+        elif 'yuva' in pix_fmt:
+            out[..., :-1] = yxx2rgb(out[..., :-1], clamp=True)
+        else:
+            out = yxx2rgb(out, clamp=True)
+
+    return out
+
+
+def _expand_fourcc(frame: np.ndarray,
+                   fourcc: tuple,
+                   shape: tuple,
+                   interpolation: int = 1,
+                   channel_axis: int = -1,
+                   compressed: bool = False) -> Union[np.ndarray, list]:
+    """ flat ndarray yuv | yuva 444, 440, 422, 420, 410 to stacked 444 ndarray
+    Args
+        frame   (ndarray) flat
+        fourcc  (tuple ) # four cc code expanded to include alpha
+        shape   (tuple) # shape of output array
+        interpolation   (int [1]) | 0: nearest | 1:linear | 2:cubic | 4:lanczos4
+        channel_axis     (int [-1]) | 0 :  CHW or HWC
+        compressed      (bool [False]) for fourcc codecs, keep compression: returns list
     """
-    height, width, channels = out.shape
+    out = []
+    shape = list(shape)
+    channels = shape.pop(channel_axis)
+    height, width = shape
 
     _area_ratio = sum(fourcc[1:3])/(fourcc[0]*2)
     _width_ratio = fourcc[1]/fourcc[0]
@@ -1068,294 +1281,15 @@ def _expand_fourcc(frame:np.ndarray, out: np.ndarray, fourcc: tuple) -> np.ndarr
     _area_uv = int(_area_ratio * _area)
     _width_uv = int(_width_ratio * width)
     _height_uv =  int(_height_ratio * height)
-    _expand_w = int(1/_width_ratio)
-    _expand_h = int(1/_height_ratio)
-
     _address = np.cumsum([_area, _area_uv, _area_uv])
 
-    out[..., 0] = frame[:_area].reshape(height, width)
+    out.append(frame[:_area].reshape(height, width))
+    for i in range(1,3):
+        data = frame[_address[i-1]:_address[i]].reshape(_height_uv, _width_uv)
+        if _area_ratio != 1 and not compressed:
+            data = cv2.resize(data, dsize=(width, height), interpolation=interpolation)
+        out.append(data)
 
-    for i in range(0, 2):
-        data = frame[_address[i]:_address[i+1]].reshape(_height_uv, _width_uv)
-        out[..., i+1] = data.repeat(_expand_w, axis=-1).repeat(_expand_h, axis=-2)
     if channels == 4:
-        out[..., 3] = frame[_address[-1]:].reshape(height, width)
+         out.append(frame[_address[-1]:].reshape(height, width))
     return out
-
-# def check_format(pix_fmt: str) -> list[float]:
-#     """ return list of channels with bits
-#     only littleendian formats supported
-#     ['abgr', 'argb', 'ayuv64le', 'bgr0', 'bgr24', 'bgr48le', 'bgra', 'bgra64le', 'rgb0', 'rgb24',
-#     'rgb48le', 'rgba', 'rgba64le', 'yuv410p', 'yuv411p', 'yuv420p', 'yuv420p10le', 'yuv420p12le',
-#     'yuv420p14le', 'yuv420p16le', 'yuv420p9le', 'yuv422p', 'yuv422p10le', 'yuv422p12le',
-#     'yuv422p14le', 'yuv422p16le', 'yuv422p9le', 'yuv440p', 'yuv440p10le', 'yuv440p12le', 'yuv444p',
-#     'yuv444p10le', 'yuv444p12le', 'yuv444p14le', 'yuv444p16le', 'yuv444p9le', 'yuva420p',
-#     'yuva420p10le', 'yuva420p16le', 'yuva420p9le', 'yuva422p', 'yuva422p10le', 'yuva422p12le',
-#     'yuva422p16le', 'yuva422p9le', 'yuva444p', 'yuva444p10le', 'yuva444p12le', 'yuva444p16le',
-#     'yuva444p9le', 'yuvj411p', 'yuvj420p', 'yuvj422p', 'yuvj440p', 'yuvj444p']
-#     """
-#     out = None
-#     if not pix_fmt.endswith('be')  and pix_fmt[:3] in ('rgb', 'bgr', 'arg', 'abg', 'yuv', 'ayu'):
-
-#         _pix_fmt = pix_fmt
-#         if _pix_fmt.endswith('le'):
-#             _pix_fmt = _pix_fmt[:-2]
-
-#         if '64' in _pix_fmt:
-#             out = [16,16,16,16]
-#         elif '48' in _pix_fmt:
-#             out = [16,16,16]
-#         elif _pix_fmt in ('rgb24', 'rgb0', 'rgb0', 'bgr24', 'bgr0', '0bgr'):
-#             out = [8,8,8]
-#         elif _pix_fmt in ('bgra', 'rgba', 'abgr', 'argb'):
-#             out = [8,8,8,8]
-
-#         elif _pix_fmt[:3] == 'yuv':
-#             bits = 8
-#             components = 3
-#             j = 1
-#             if _pix_fmt[-j].isnumeric():
-#                 while _pix_fmt[-j].isnumeric():
-#                     j += 1
-#                 bits = int(_pix_fmt[-j+1:])
-#             _pix_fmt = _pix_fmt.split('yuv')[1]
-#             if not _pix_fmt[0].isnumeric():
-#                 if _pix_fmt[0] == 'a':
-#                     components += 1
-#                 _pix_fmt = _pix_fmt[1:]
-#             if not _pix_fmt[:3].isnumeric():
-#                 raise NotImplementedError(f"format not implemented {pix_fmt}")
-#             out = [bits*int(c)/4 for c in _pix_fmt[:3]]
-#             if components == 4:
-#                 out = [bits] + out
-#     return out
-
-
-
-# def read_yuv(yuv: Union[str, bytes], width: int, height: int, fmt: str) -> np.ndarray:
-#     """ convert yuv422 10bit yuv file or bytes to ndarray
-#     Args:
-#         fname   (str or bytes) .yuv 422 file or buffer
-#         width   (int) expected frame width
-#         height  (int) expected frame height
-#         fmt     (str)
-#     """
-#     yuv = read_bytes(yuv)
-#     if fmt.endswith('be'), "big endian formats "
-#     # if ('10le' in fmt or '12le' in fmt or '14')
-#     dtype = np.uint8 
-#     frame = np.frombuffer(yuv, dtype=np.uint16)
-#     return _expand_422(frame, width, height)
-
-
-# def read_yuv42210le(yuv: Union[str, bytes], width=4448, height=3096) -> np.ndarray:
-#     """ convert yuv422 10bit yuv file or bytes to ndarray
-#     Args:
-#         fname   (str or bytes) .yuv 422 file or buffer
-#         width   (int) expected frame width
-#         height  (int) expected frame height
-#     """
-#     yuv = read_bytes(yuv)
-#     frame = np.frombuffer(yuv, dtype=np.uint16)
-#     return _expand_422(frame, width, height)
-
-
-# def read_yuv420p(yuv:  Union[str, bytes], width: int, height: int) -> np.ndarray:
-#     """ convert y420p 8bit .yuv file to ndarray
-#     Args:
-#         yuv     (str or bytes) .yuv 420 file or buffer
-#         width   (int) expected frame width
-#         height  (int) expected frame height
-#     """
-#     yuv = read_bytes(yuv)
-#     frame = np.frombuffer(yuv, dtype=np.uint8)
-#     return _expand_420(frame, width, height)
-
-
-# def read_yuv440p(yuv:  Union[str, bytes], width: int, height: int) -> np.ndarray:
-#     """ convert y420p 8bit .yuv file to ndarray
-#     Args:
-#         yuv     (str or bytes) .yuv 420 file or buffer
-#         width   (int) expected frame width
-#         height  (int) expected frame height
-#     """
-#     yuv = read_bytes(yuv)
-#     frame = np.frombuffer(yuv, dtype=np.uint8)
-#     return _expand_440(frame, width, height)
-
-
-# def _expand_440(frame:np.ndarray, width: int, height: int) -> np.ndarray:
-#     """ expand flat yuv422 data to yuv444 (w,h,3) """
-#     out = np.empty((height, width, 3), dtype=frame.dtype)
-#     _area = frame.shape[0]//2
-#     out[..., 0] = frame[:_area].reshape(height, width)
-#     out[..., 1] = frame[_area:(3*_area)//2].reshape(height, width//2).repeat(2, axis=-1)
-#     out[..., 2] = frame[(3*_area)//2:].reshape(height, width//2).repeat(2, axis=-1)
-#     return out
-
-# def _expand_422(frame:np.ndarray, width: int, height: int) -> np.ndarray:
-#     """ expand flat yuv422 data to yuv444 (w,h,3) """
-#     out = np.empty((height, width, 3), dtype=frame.dtype)
-#     _area = int(frame.shape[0]//2)
-#     out[..., 0] = frame[:_area].reshape(height, width)
-#     out[..., 1] = frame[_area:(3*_area)//2].reshape(height, width//2).repeat(2, axis=1)
-#     out[..., 2] = frame[(3*_area)//2:].reshape(height, width//2).repeat(2, axis=1)
-#     return out
-
-
-# def _expand_420(frame:np.ndarray, width: int, height: int) -> np.ndarray:
-#     """ expand flat yuv420 data to yuv444 (w,h,3)
-#     """
-#     out = np.empty((height, width, 3), dtype=frame.dtype)
-#     _area = int(frame.shape[0]//1.5)
-#     out[..., 0] = frame[:_area].reshape(height, width)
-#     out[..., 1] = frame[_area:_area + _area//4].reshape(height//2, width//2).repeat(2, axis=-2).repeat(2, axis=-1)
-#     out[..., 2] = frame[_area + _area//4:].reshape(height//2, width//2).repeat(2, axis=-2).repeat(2, axis=-1)
-#     return out
-
-
-
-
-# def yuv422p10le_to_float(raw_data, width):
-#     # Step 1: Read the raw video data from the pipe as bytes.
-#     # raw_data = proc.communicate()[0]
-
-#     # Step 2: Convert the bytes to a 1-dimensional NumPy array of unsigned integers.
-#     yuv = np.frombuffer(raw_data, dtype=np.uint16)
-
-#     # Step 3: Reshape the array to have the appropriate dimensions for the video frames.
-#     yuv = yuv.reshape(-1, 2, width, 2).transpose((0, 2, 1, 3))
-
-#     # Step 4: Convert the YUV color space to RGB color space.
-#     yuv = yuv.astype(np.float32)
-#     y = yuv[..., 0]
-#     u = yuv[..., 1] - 512
-#     v = yuv[..., 3] - 512
-#     r = y + 1.13983*v
-#     g = y - 0.39465*u - 0.58060*v
-#     b = y + 2.03211*u
-#     rgb = np.stack([r, g, b], axis=-1)
-#     rgb = np.clip(rgb, 0, 1023) / 1023
-
-#     # Step 5: Convert the resulting RGB values to float in the range of 0 to 1.
-#     rgb = rgb.astype(np.float32)
-#     rgb = rgb / 1023.0
-
-#     return rgb
-
-# def yuv2rgb(yuv_image):
-#     """Converts a YUV image to RGB color space.
-
-#     Args:
-#         yuv_image (numpy.ndarray): A numpy array representing the YUV image.
-
-#     Returns:
-#         numpy.ndarray: A numpy array representing the RGB image.
-
-#         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_YUV2RGB_J420)
-#         rgb_frame = skimage.color.yuv2rgb(frame)
-#     """
-#     y = yuv_image[..., 0]
-#     u = yuv_image[..., 1]
-#     v = yuv_image[..., 2]
-
-#     r = y + 1.13983 * v
-#     g = y - 0.39465 * u - 0.5806 * v
-#     b = y + 2.03211 * u
-
-#     return np.dstack([r, g, b])
-
-
-
-
-## NOTES
-        # def stream(stream_spec, cmd='ffmpeg', capture_stderr=False, input=None, quiet=False, overwrite_output=False):
-#     args = compile(stream_spec, cmd, overwrite_output=overwrite_output)
-
-#     # calculate framezie
-#     framesize = _get_frame_size(stream_spec)
-
-#     stdin_stream = subprocess.PIPE if input else None
-#     stdout_stream = subprocess.PIPE
-#     stderr_stream = subprocess.PIPE if capture_stderr or quiet else None
-#     p = subprocess.Popen(args, stdin=stdin_stream, stdout=stdout_stream, stderr=stderr_stream)
-
-#     while p.poll() is None:
-#         yield _read_frame(p, framesize)
-
-# def _read_frame(process, framesize):
-#     return process.stdout.read(framesize)
-
-
-# lossless
-# ffmpeg -i left.avi -i right.avi -filter_complex hstack -c:v ffv1 output.avi
-# # lossy
-# ffmpeg -i left.avi -i right.avi -filter_complex "hstack,format=yuv420p" -c:v libx264 -crf 18 output.mp4
-# # audio
-# # ffmpeg -i left.avi -i right.avi -filter_complex "[0:v][1:v]hstack,format=yuv420p[v];[0:a][1:a]amerge[a]" -map "[v]" -map "[a]" -c:v libx264 -crf 18 -ac 2 output.mp4
-
-# snippets
-# https://trac.ffmpeg.org/wiki/FFprobeTips
-
-# # extract 3 frames at second 7
-# ffmpeg -i MUCBCN.mp4 -ss 00:00:07.000 -vframes 3 thumb%04d.jpg -hide_banner #70KB
-# ffmpeg -i MUCBCN.mp4 -ss 00:00:07.000 -vframes 3 thumb%04d.png -hide_banner #2MB
-# ffmpeg -i MUCBCN.mp4 -ss 00:00:07.000 -vframes 3 thumb%04d.bmp -hide_banner #6MB
-
-# # extract and ensure renumbering is frame 
-# ffmpeg -i 'MUCBCN.mp4' -ss 00:00:12.000 -start_number 299 -vframes 3 thumb%04d.jpg -hide_banner
-
-# # extract as video 
-# ffmpeg -ss 120.2 -t 0.75 -i MUCBCN.mp4 out_muc.mp4 #use h264 default
-# # ffmpeg -ss 120.2 -t 1.75 -i MUCBCN.mp4 out_muc.mp4 #-vcodec copy or -c:v copy fail to set the right timeline
-
-# #extract as webm
-# # No bit rate set. Defaulting to 96000 bps. - good bit rate 2000 to 3000 ; resize video - 
-
-# # scaling
-# ffmpeg -i input.jpg -vf scale=320:-1 output_320.png # keep aspect ration
-
-# ffmpeg -i input.jpg -vf "scale=iw/2:ih/2" input_half_size.png
-# ffmpeg -i input.jpg -vf "scale='min(320,iw)':'min(240,ih)'" input_not_upscaled.png
-# # scale, clip time
-# ffmpeg -ss 120.0 -t 3.0 -i MUCBCN.mp4 -vf "scale='min(320,iw/4)':-1" output.webm
-
-# #ok
-# sp.Popen(['ffmpeg', '-i', 'MUCBCN.mp4', '-ss', '00:00:20.000', '-t', '12.0', 'MUCBCN_500-800.mp4'], stdin=sp.PIPE, stderr=sp.PIPE)
-# #fail
-# sp.Popen(['ffmpeg', '-i', 'MUCBCN.mp4', '-ss', '00:00:20.000', '-t', '11.0', '-vf', 'scale=iw/.25:-1', 'MUCBCN_500-800_.25.mp4'], stdin=sp.PIPE, stderr=sp.PIPE)
-# #ok
-# ffmpeg -ss 00:00:20.000 -t 12.0 -i MUCBCN.mp4 -vf "scale=iw/2:-1" output.mp4
-# ffmpeg -ss 00:00:20.000 -t 12.0 -i MUCBCN.mp4 -vf scale=iw/2:-1 output.mp4
-
-# #play
-# #half speed (audio doen not chnage speed)
-# ffplay MUCBCN.mp4 -vf "setpts=2*PTS"
-
-
-# # gif export
-# ffmpeg -i INPUT -loop 10 -final_delay 500 out.gif
-#     loop -1 none, 0 forever
-
-# #https://ffmpeg.org/ffmpeg-formats.html
-
-# #optimize gif export: generate palette / doesnt really work...
-# ffmpeg -y -i INPUT -vf palettegen palette.png
-# ffmpeg -y -i INPUT -i palette.png -filter_complex paletteuse OUT.gif
-
-
-# def tenbitread(f):
-#     ''' Generate 10 bit (unsigned) integers from a binary file '''
-#     while True:
-#         b = f.read(5)
-#         if not len(b):
-#             break
-#         n = int.from_bytes(b, 'little')
-#         #Split n into 4 10 bit integers
-#         yield n & 0x3ff
-#         n >>= 10
-#         yield n & 0x3ff
-#         n >>= 10
-#         yield n & 0x3ff
-#         n >>= 10
-#         yield n

@@ -3,6 +3,9 @@
 
 Useful functions are mostly in ff_main.py
 
+v 0.17  FF.to_numpy() to output most little endian fourcc, correct bit depth.
+new class FFDataset() uses same methods as FF.to_numpy()
+started deprecating AVDataset
 
 v 0.16 fixed FF.export_frames() FF.to_numpy() FF.export_clip()
 added FF.vlc() to play exact in and out frames using cvlc
@@ -18,6 +21,7 @@ to deprecate FF.play() uses ffplay -ss and -t are not valid
 v 0.15 - could break things. WILL remove files in the future and simplify
 added output to subtitles
 updated video dataset
+
 
 ------------------
 
