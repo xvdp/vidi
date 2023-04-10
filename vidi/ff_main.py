@@ -585,12 +585,12 @@ class FF():
 
 
     def export_frames(self,
-                      out_name: Optional[str] = None,
                       start: Union[int, float] = 0,
                       nb_frames: Optional[int] = None,
                       end: Union[int, float, str, None] = None,
                       scale: Union[float, tuple[float, float]] = 1.,
                       stream: int = 0,
+                      out_name: Optional[str] = None,
                       out_folder: str = None,
                       scale_aspect_ratio: int = -1,
                       **kwargs) -> str:
@@ -610,12 +610,17 @@ class FF():
             stream      (int [0]) if more than one stream in video
             out_folder  optional, save to folder
             scale_aspect_ratio  (int, [-1]), 0, 1: if 'sample_aspect_ratio' in clip and not 1:1
-                default: [-1] scales extended dimension down, 1 scales shorter dimension up, 0 nothing
+                default: -1: downscales extended dim; 1: up scales shorter dim; 0: no scaling
 
         kwargs
             out_format  (str) in (".png", ".jpg", ".bmp") format override
             crop        (list, tuple (w,h,x,y)
         """
+        out_name = out_name if out_name is not None else self.file
+        out_name, out_format = osp.splitext(out_name)
+        if out_format == ".yuv":
+            warnings.warn("yuv format only exports only one frame with ffmpeg.")
+
         cmd = self._export(start=start, nb_frames=nb_frames, end=end, scale=scale,
                            scale_aspect_ratio=scale_aspect_ratio,
                            stream=stream, crop=kwargs.get('crop', None))
@@ -623,14 +628,14 @@ class FF():
         start_frame, nb_frames = self.frame_range
 
         # resolve name
-        out_name = out_name if out_name is not None else self.file
-        out_name, out_format = osp.splitext(out_name)
-        out_format = kwargs.get('out_format', out_format)
-        if out_format.lower() not in (".png", ".jpg", ".jpeg", ".bmp"):
-            out_format = ".png"
+        out_name = f"{out_name}_{self.stats['out_width']}_{self.stats['out_height']}"
 
-        if scale not in (1, (1, 1)):
-            out_name += f"_{'-'.join(scale)}" if isinstance(scale, (list,tuple)) else f"_{scale}"
+        out_format = kwargs.get('out_format', out_format)
+        if out_format.lower() not in (".png", ".jpg", ".jpeg", ".bmp", ".yuv"):
+            out_format = ".png"
+        if out_format == '.yuv':
+            if 'yuv' in self.stats['pix_fmt']:
+                out_name = f"{out_name}_{self.stats['pix_fmt']}"
 
         out_name = f"{out_name}_{self.stats['pad']}{out_format}"
 
@@ -640,10 +645,12 @@ class FF():
             out_name = osp.join(out_folder, osp.basename(out_name))
         cmd.append(out_name)
 
-        _msg = ["exporting", out_name%(start_frame)]
-        if nb_frames > 1:
-            _msg += ["to ", out_name%(start_frame + nb_frames)]
-        print(*_msg, " ...")
+        if 'verbose' in kwargs and kwargs['verbose']:
+            _msg = ["exporting", out_name%(start_frame)]
+            if nb_frames > 1:
+                _msg += ["to ", out_name%(start_frame + nb_frames)]
+            print(*_msg, " ...")
+            print(" ".join(cmd))
 
         proc = sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE, stdout=sp.PIPE)
         proc.wait()
@@ -822,7 +829,7 @@ class FF():
         if to_rgb and 'yuv' in pix_fmt and channel_axis != -1:
             channel_axis = -1
             _transpose = True
- 
+
         _fcmd = [self.ffmpeg, '-i', self.file]
         _fcmd += self.format_start_end(start, nb_frames, end)
         _fcmd += self.build_filter_graph(start_frame=self.frame_range[0], scale=scale,
