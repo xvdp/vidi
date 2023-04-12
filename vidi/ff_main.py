@@ -10,7 +10,6 @@ import warnings
 import os
 import os.path as osp
 import subprocess as sp
-import platform
 import json
 import numpy as np
 import cv2
@@ -56,7 +55,7 @@ class FF():
     """
     def __init__(self, fname: str) -> None:
 
-        assert osp.isfile(fname), f"video not found{fname}"
+        assert osp.isfile(fname), f"video not found {fname}"
 
         self.ffplay = 'ffplay'
         self.ffmpeg = 'ffmpeg'
@@ -131,6 +130,8 @@ class FF():
             self.stats['rate'] = 30.0
             warnings.warn('no frame rate stats were found for stream, defaulting to 30 or fix code')
 
+        if 'tags' in _stats and 'timecode' in _stats['tags']:
+            self.stats['timecode'] = _stats['tags']['timecode']
         if 'nb_frames' in _stats:
             self.stats['nb_frames'] = eval(_stats['nb_frames'])
         elif 'tags' in _stats and 'DURATION' in _stats['tags'] and 'rate' in self.stats:
@@ -138,7 +139,7 @@ class FF():
             seconds = sum(x * float(t) for x, t in zip([3600, 60, 1], duration.split(":")))
             self.stats['nb_frames'] = round(seconds * self.stats['rate'])
         else:
-            warnings.warn("'nb_frames' not found in stats, set manually or fix code") 
+            warnings.warn("'nb_frames' not found in stats, set manually or fix code")
         _pad = 6
         if 'nb_frames' in self.stats:
             _pad = int(np.ceil(np.log10(self.stats['nb_frames'])))
@@ -432,61 +433,6 @@ class FF():
         sp.call(_fcmd)
 
         return True
-
-    def get_size(self, size: Union[str, tuple, int, None] = None) -> str:
-        """ converts size to str 
-        """
-        if size is not None:
-            if isinstance(size, str) and size.isnumeric(size):
-                size = int(size)
-            if isinstance(size, int):
-                size = (size, size)
-            if isinstance(size, (tuple, list)):
-                size = f"{size[0]}x{size[1]}"
-            if not isinstance(size, str) and (size.split('x')) == 2:
-                raise NotImplementedError(f"size={size} invalid, \
-                                          accepts: (int, int), int, 'intxint'")
-        return size
-
-
-    def stitch(self, dst, src, audio, fps, size, start_img, max_img, pix_fmt="yuv420p"):
-        """
-        HAS NOT BEEN REVISED
-        ffmpeg -r 29.97 -start_number 5468 -i metro%08d.png -vcodec libx264 -pix_fmt yuv420p \
-              /home/z/metropolis_color.mov
-        ffmpeg -r 29.97 -start_number 5468 -i metro%08d.png -vcodec libx264 -pix_fmt yuv420p \
-            -vframes 200 /home/z/metro_col.mov #only 200 frames
-        """
-        _ff = 'ffmpeg' if platform.system() != "Windows" else 'ffmpeg.exe'
-        _fcmd = [_ff, '-r', str(fps)]
-
-        # has to be before input
-        if start_img is not None:
-            _fcmd += ['-start_number', str(start_img)]
-
-        _fcmd += ['-i', src]
-
-        if audio is not None:
-            _fcmd += ['-i', audio]
-
-        size = self.get_size(size)
-        if size is not None:
-            _fcmd += ['-s', size]
-
-        # codecs
-        _fcmd += ['-vcodec', 'libx264']
-        if audio is not None:
-            _fcmd += ['-acodec', 'copy']
-
-        _fcmd += ['-pix_fmt', pix_fmt]
-        _fcmd += [dst]
-
-        # number of frames # has to be just before outpyut
-        if max_img is not None:
-            _fcmd += ['-vframes', str(max_img)]
-
-        print(" ".join(_fcmd))
-        sp.call(_fcmd)
 
 
     def _export(self,
@@ -1300,3 +1246,228 @@ def _expand_fourcc(frame: np.ndarray,
     if channels == 4:
          out.append(frame[_address[-1]:].reshape(height, width))
     return out
+
+
+def images_to_video(dst: str,
+                    src: str,
+                    start_number: Optional[int],
+                    overwrite: bool = False, **kwargs) -> str:
+    """ creates a video file from sequence of patterned images, default is  prores yuv422p10le 
+    Args
+        dst             (str) output file               e.g. metropolis_color.mov
+        src             (str) input patterned file      e.g. metro%08d.png
+        overwrite       (bool [False])
+        start_number    (int) source pattern start file_number # if concat enabled, make optional
+    kwargs
+        frame_rate      (float, str [24000/1001])  str in ('ntsc', 'pal', 'qntsc', 
+                                    'qpal', 'sntsc', 'spal', 'film', 'ntsc-film')
+        pix_fmt         (str ['yuv420p10le'])   in ffmpeg -pix_fmts | grep O
+        scale           (int, tuple, str)   str as f'{width}:{height}'
+        sar             (int) sample aspect ratio, if sar and no scale, scales appropriately
+        vcodec          (str ['prores']) huffyuv, h264, mjpeg, mpeg4, h264, ... in ffmpeg -codecs
+            profile     (str) ['hq'] # if vcodec == prores
+        color_trc       (str ['bt709']) | gamma22 gama28 linear, log, ,...
+        color_range     (str ['tv'])
+        field_order     (str ['progressive']) | tt, bb, tb, bt
+        time_base       (float [1/frame_rate])
+        timecode        (str)   # 01:20:10:05
+        vframes         (int)   # max number of frames to include
+
+    >>> src = 'some_file_%03d.png'
+    >>> cmd = images_to_video('TEST.mov', src, start_number=127, sar=2, overwrite=True, timecode="01:20:10:05")
+    >>> cmd = images_to_video('TEST.mov', src, start_number=127, frame_rate=24000/1001, scale=(512,512), pix_fmt="yuvj420p", vcodec="mjpeg", overwrite=True, b="128K", vframes=10)
+    """
+    def get_size(size: Union[str, tuple, int]) -> Optional[str]:
+        if isinstance(size, str) and size.isnumeric():
+            size = int(size)
+        if isinstance(size, int):
+            size = (size, size)
+        if isinstance(size, (tuple, list)):
+            size = f"{size[0]}:{size[1]}"
+        if isinstance(size, str) and len(size.split(':')) == 2:
+            return size
+        return None
+
+    def str_op(dic, key, val=None, prefix='-', conj=' '):
+        if key in dic or val is not None:
+            return f"{prefix}{key}{conj}{dic.get(key, val)}"
+        return ""
+
+    # output
+    # dst = osp.abspath(osp.expanduser(dst))
+    if osp.isfile(dst):
+        if not overwrite:
+            warnings.warn(f"No file written, {dst} exists, set overwrite=True")
+            return None
+        else:
+            dst = f"-y {dst}"
+
+    # frame rate
+    frame_rate = kwargs.get('frame_rate',  24000/1001)
+    _strrates = {'ntsc': 30000/1001, 'pal': 25/1, 'qntsc': 30000/1001 , 'qpal': 25/1,
+                 'sntsc': 30000/1001, 'spal': 25/1, 'film': 24/1 , 'ntsc-film': 24000/1001}
+    if isinstance(frame_rate, str):
+        frame_rate = _strrates[frame_rate]
+
+    # inputs
+    # concatenation has issues
+    # _file_list = None
+    # if osp.isdir(src):
+    #     src = [f.path for f in os.scandir(src)]
+
+    # if isinstance(src, (list, tuple)):
+    #     filetype = kwargs.get('filetype', 'file') #'movie'
+    #     if 'filetype' not in kwargs:
+    #         warnings.warn("concat 'filetype=' not passed assuming 'file")
+    #     _file_list = '_ffmpeg_concat.txt'
+    #     files = [f"{filetype} '{f}'\nduration {1/frame_rate}" for f in src]
+    #     with open (_file_list, 'a', encoding='utf8') as _fi:
+    #         _fi.write("\n".join(files))
+    #     src = f'-f concat -i {_file_list}'
+    # else:
+        # src = osp.abspath(osp.expanduser(src))
+    # if concat is fixed make start number optional
+    # start = str_op(kwargs, 'start_number') if '%' in src else ''
+
+    if '%' in src:
+        assert start_number is not None, f"start_number req' with patterned {src}"
+        start = f"-start_number {start_number}"
+    _test_src = src if '%' not in src else src%start_number
+    assert osp.isfile(_test_src), f"file {_test_src} not found"
+    src = f'-i {src}'
+
+    pix_fmt = str_op(kwargs, 'pix_fmt',  'yuv422p10le')
+    vcodec = str_op(kwargs, 'vcodec',  'prores_ks') # c:v'
+    vframes = str_op(kwargs, 'vframes', prefix=' -') # max num of frames to include
+
+    opts = [str_op(kwargs, 'color_range', 'tv'), # mpeg, pc, jpeg
+               str_op(kwargs, 'field_order', 'progressive'), # tt, bb, tb, bt
+               str_op(kwargs, 'time_base',  1/frame_rate)]
+
+    if 'prores_ks' in vcodec:
+        opts += [str_op(kwargs, 'profile', 'hq', conj=":v "),
+                 str_op(kwargs, 'color_trc', 'bt709'),]
+
+    scale = get_size(kwargs.get('scale'))
+    sar = kwargs.get('sar')
+    if sar:
+        opts += [str_op(kwargs, 'sar')]
+        if scale is None:
+            opts += [f"-vf scale='trunc(iw/{sar}):ih'"]
+    if scale is not None:
+        opts += [f"-vf scale={scale}"]
+
+    # TODO Add audio codec and options
+    _opts = ['b',        # bits/sec [200K]   -b 1200K (8000K)
+             'ab',       # audio bits/sec [128k]
+             'flags',    # mv
+             'ar',       # audio sampling Hz
+             'ac',       # audio channels
+            #  'b:a',      # audio bit rate 96k
+             'timecode'
+             ]      # sample aspect ratio
+
+    opts += [f" -{op} {val}" for op, val in kwargs.items() if op in _opts]
+    opts = " " + " ".join([o for o in opts if o])
+
+    cmd = f'ffmpeg {start} {src}{vframes} -r {frame_rate} {pix_fmt} {vcodec}'
+    cmd += f'{opts} {dst}'
+    if kwargs.get('run', True):
+        sp.call(cmd.split())
+    return cmd
+
+
+    # ffmpeg -r 29.97 -start_number 5468 -i metro%08d.png -vcodec libx264 -pix_fmt yuv420p \
+    #         /home/z/metropolis_color.mov 
+    # ffmpeg -r 29.97 -start_number 5468 -i metro%08d.png -vcodec libx264 -pix_fmt yuv420p \
+    #     -vframes 200 /home/z/metro_col.mov #only 200 frames
+
+
+    # ffmpeg -i input.mkv -map 0:v -map 0:a -map 0:s -c:s copy -c:a libopus -b:a 96k \
+    #     -pix_fmt yuv420p10le -c:v libsvtav1 -crf 30 -preset 7 output.mkv
+
+    # ffmpeg -i input.mkv  -c:s copy -c:a libopus -b:a 96k -pix_fmt yuv420p10le \
+    #     -c:v libsvtav1 -crf 30 -preset 7 output.mkv
+
+    # ffmprobe -encoders
+    # (abj) z@zXb:/mnt/Data/data/Proto$ ffprobe -encoders | grep prores
+    #     ffprobe version 4.3 Copyright (c) 2007-2020 the FFmpeg developers built with gcc 7.3.0 (crosstool-NG 1.23.0.449-a04d0)
+    #     configuration: --prefix=/opt/conda/conda-bld/ffmpeg_1597178665428/_h_env_placehold_placehold_placehold_placehold_
+    #     placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_
+    #     placehold_placehold_placehold_placehold_placehold_placeh
+    #         --cc=/opt/conda/conda-bld/ffmpeg_1597178665428/_build_env/bin/x86_64-conda_cos6-linux-gnu-cc --disable-doc --disable-openssl
+    #         --enable-avresample --enable-gnutls --enable-hardcoded-tables --enable-libfreetype --enable-libopenh264 --enable-pic
+    #         --enable-pthreads --enable-shared --disable-static --enable-version3 --enable-zlib --enable-libmp3lame
+    #     libavutil      56. 51.100 / 56. 51.100
+    #     libavcodec     58. 91.100 / 58. 91.100
+    #     libavformat    58. 45.100 / 58. 45.100
+    #     libavdevice    58. 10.100 / 58. 10.100
+    #     libavfilter     7. 85.100 /  7. 85.100
+    #     libavresample   4.  0.  0 /  4.  0.  0
+    #     libswscale      5.  7.100 /  5.  7.100
+    #     libswresample   3.  7.100 /  3.  7.100
+    #     VF.... prores               Apple ProRes
+    #     VF.... prores_aw            Apple ProRes (codec prores)
+    #     VFS... prores_ks            Apple ProRes (iCodec Pro) (codec prores)
+    #     https://ffmpeg.org/ffmpeg-codecs.html#ProRes
+
+    #     ffmpeg -i input.bmp -c:v jpeg2000 -layer_rates "100,10,1" output.j2k
+    #     ffmpeg -i input -c:v librav1e -b:v 500K -rav1e-params speed=5:low_latency=true output.mp4
+    #     ffmpeg -i input -c:v libaom-av1 -b:v 500K -aom-params tune=psnr:enable-tpl-model=1 output.mp4
+    #     ffmpeg -i INPUT -codec:v libtheora -q:v 10 OUTPUT.ogg
+    #     ffmpeg -i foo.mpg -c:v libx264 -x264opts keyint=123:min-keyint=20 -an out.mkv
+    #     ffmpeg -i input -c:v libx265 -x265-params crf=26:psy-rd=1 output.mp4
+    #     ffmpeg -i input -c:v libxavs2 -xavs2-params RdoqLevel=0 output.avs2
+
+    #     -c:v prores
+    #     -vcodec prores
+    #     -profile [proxy, lt, standard hq, 4444, 4444xq]
+    #     -quant_mat [auto, default, proxy, lt, standard, hq]
+    #     -bits_per_mb [200 - 2400  8000] 
+
+    # color_primaries integer (decoding/encoding,video) ‘bt709’ ‘bt2020’
+    # https://ffmpeg.org/ffmpeg-codecs.html#Video-Encoders
+    
+
+    #     ffprobe V204F-4A_TEST_WEDGE.mov
+    #     Duration: 00:00:07.88, start: 0.000000, bitrate: 1195427 kb/s
+    # Stream #0:0(eng): Video: prores (HQ) (apch / 0x68637061), yuv422p10le(tv, bt709, progressive), 4448x3096, 1195424 kb/s, SAR 2:1 DAR 1112:387, 23.98 fps, 23.98 tbr, 24k tbn, 24k tbc (default)
+    #     Metadata:
+    #         creation_time   : 2023-03-20T16:26:45.000000Z
+    #         handler_name    : Libquicktime Video Media Handler
+    #         encoder         : Apple ProRes 422 HQ
+    #         timecode        : 16:02:12:20
+
+            
+    # ffmpeg -r 23.976023976023978 -start_number 127 -i V204F-4A_TEST_FS/V204F-4A_TEST_WEDGE_8896_3096_%03d.png -pix_fmt yuv422p10le -c:v prores -color_range tv -field_order progressive -time_base 0.0417083 -color_trc bt709 TEST.MOV -vframes 5
+    # Stream #0:0: Video: prores (Standard) (apcn / 0x6E637061), yuv422p10le(tv, unknown/unknown/bt709, progressive), 8896x3096 [SAR 1:1 DAR 1112:387], q=2-31, 200 kb/s, 23.98 fps, 24k tbn, 23.98 tbc
+
+    # ffprobe TEST.mov
+    # Stream #0:0: Video: prores (Standard) (apcn / 0x6E637061), yuv422p10le(tv, progressive), 8896x3096, 594499 kb/s, SAR 1:1 DAR 1112:387, 23.98 fps, 23.98 tbr, 24k tbn, 24k tbc (default)
+
+    # Duration: 00:00:02.55, start: 0.000000, bitrate: 594318 kb/s
+    # # vframes doesnt clip number of frames
+    # # prores standard -> hq / try prores_ks
+    # # bitrate 594 499 -> 1 195 424
+    # # SAR 1:1 -> SAR 2:1
+
+    # ffmpeg -r 23.976023976023978 -start_number 127 -i V204F-4A_TEST_FS/V204F-4A_TEST_WEDGE_8896_3096_%03d.png -pix_fmt yuv422p10le -c:v prores_ks -profile hq -color_range tv -field_order progressive -time_base 0.04170833333333333 -color_trc bt709 TEST.MOV -vframes 5
+    # Stream #0:0: Video: prores (HQ) (apch / 0x68637061), yuv422p10le(tv, progressive), 8896x3096, 1628724 kb/s, SAR 1:1 DAR 1112:387, 23.98 fps, 23.98 tbr, 24k tbn, 24k tbc (default)
+    # Please use -profile:a or -profile:v, -profile is ambiguous
+    # # hq ok, bitrate ok
+
+    # ffmpeg -r 23.976023976023978 -start_number 127 -i V204F-4A_TEST_FS/V204F-4A_TEST_WEDGE_8896_3096_%03d.png -vframes 5 -pix_fmt yuv422p10le -c:v prores_ks -profile:v hq -color_range tv -field_order progressive -time_base 0.04170833333333333 -color_trc bt709 TEST.MOV
+    # # vrames ok.
+
+    # bitstream filters
+    # https://ffmpeg.org/ffmpeg-bitstream-filters.html
+    # ffmpeg -i INPUT -c copy -bsf:v prores_metadata=color_primaries=bt709:color_trc=bt709:colorspace=bt709 output.mov
+    # ffmpeg -i INPUT -c copy -bsf:v prores_metadata=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc output.mov
+
+    # display_aspect_ratio
+    # ffmpeg -i <INPUT_FILE> -aspect 720:540 -c copy [OUTPUT_FILE]
+    # sample_aspect_ratio
+    # https://superuser.com/questions/907933/correct-aspect-ratio-without-re-encoding-video-file
+    # ffmpeg -i in.mp4 -c copy -bsf:v "h264_metadata=sample_aspect_ratio=4/3" out.mp4
+
+    # -vf setsar=sar=4/3

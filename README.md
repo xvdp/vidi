@@ -3,6 +3,10 @@
 
 Useful functions are mostly in ff_main.py
 
+v 0.18 exposed yuv <-> conversions
+    vidi.rgb2yxx(), vidi.yxx2rgb(), vidi.from_bits(), vidi.to_bits(), vidi.read_frame()
+    vidi.images_to_video()
+
 v 0.17  FF.to_numpy() to output most little endian fourcc, correct bit depth.
 new class FFDataset() uses same methods as FF.to_numpy()
 started deprecating AVDataset
