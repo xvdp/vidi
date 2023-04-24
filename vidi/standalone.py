@@ -98,6 +98,24 @@ def frames_to_numpy(filename: str,
                     compressed: bool = False,
                     dtype: Union[str, np.dtype, None] = np.float32,
                     **kwargs) -> np.ndarray:
+    """
+    read video to float numpy
+        Args
+            start               (int|float [0])  float: seconds, int: frame, str: HH:MM:SS.mmm
+            nb_frames           (int [None]) None: all frames
+            end                 (int, float, str, None) overrides nb_frames
+            scale               (float [1])
+            stream              (int [0]) video stream to load
+            scale_aspect_ratio  (int [-1]) -1 downscale, 0 None, or upscale 1 aspect ratio ['sar']
+            to_rgb              (bool [False]) if fourcc and True: converts
+            crop                (tuple (w,h,x,y) [None])    -> crop=crop[0]:crop[1]}crop[2]:crop[3]
+            compressed          (bool [False]) if fourcc and True: return list of arrays
+            dtpye               (np.dtype [np.float32])
+        kwargs
+            pix_fmt             convert to pix_fmt before to_numpy()
+            channel_axis        (int in -1, 0) -1: H,W,C  0: C,H,W
+            interpolation       (int in 0,1,2,4) 0 NEAR, 1 LINEAR, 2 CUBIC 4 LANCZOS
+    """
     vid = FF(filename)
     return vid.to_numpy(start, nb_frames, end, scale, stream, scale_aspect_ratio, to_rgb,
                         crop, compressed, dtype, **kwargs)

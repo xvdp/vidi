@@ -318,36 +318,6 @@ class FF():
         proc.wait()
         proc.stdout.close()
 
-    # def playfiles(self, fname=None, folder=".", max_frames=None, fmt=('.jpg', '.jpeg', '.png'),):
-
-    #     imgs, start = self._io.get_images(folder=folder, name=fname, fmt=fmt, max_imgs=max_frames)
-
-    #     print(self.ffplay)
-    #     print(start)
-    #     print(self.ffplay)
-    #     print(self.ffplay)
-    #     if not imgs:
-    #         return None
-
-    #     _fcmd = [self.ffplay]
-    #     if start or start is not None:
-    #         _fcmd += ["-start_number", str(start)]
-    #     _fcmd += ['-i', imgs]
-
-    #     print(" ".join(_fcmd))
-    #     print("-------Interaction--------")
-    #     print(" 'q', ESC        Quit")
-    #     print(" 'f', LMDC       Full Screen")
-    #     print(" 'p', SPACE      Pause")
-    #     print(" '9'/'0'         Change Volume")
-    #     print(" 's'             Step one frame")
-    #     print("  RT,DN / LT,UP  10sec jump")
-    #     print("  RMC            jump to percentage of film")
-    #     print("--------------------------")
-    #     sp.call(_fcmd)
-
-    #     return True
-
 
     def _export(self,
                 start: Union[int, float, str] = 0,
@@ -452,7 +422,7 @@ class FF():
 
         kwargs
             out_format  (str) in (".png", ".jpg", ".bmp") format override
-            crop        (list, tuple (w,h,x,y)
+            crop        (tuple (w,h,x,y) [None])    -> crop=crop[0]:crop[1]}crop[2]:crop[3]
         """
         out_name = out_name if out_name is not None else self.file
         out_name, out_format = osp.splitext(out_name)
@@ -525,7 +495,7 @@ class FF():
             stream      (int [0]) if more than one stream in video
         kwargs
             out_format  (str) in (".mov", ".mp4") format override
-            crop        (list, tuple (w,h,x,y)
+            crop        (tuple (w,h,x,y) [None])    -> crop=crop[0]:crop[1]}crop[2]:crop[3]
         ffmpeg -i a.mp4 -force_key_frames 00:00:09,00:00:12 out.mp4
         """
         cmd = self._export(start=start, nb_frames=nb_frames, end=end, scale=scale,
@@ -617,18 +587,28 @@ class FF():
         """
         read video to float numpy
         Args
-            start       (int|float [0])  float: seconds, int: frame, str: HH:MM:SS.mmm
-            nb_frames   (int [None]) None: all frames
-            end         (int, float, str, None) overrides nb_frames
-            scale       (float [1])
-            stream      (int [0]) video stream to load
-            step        (int [1]) step thru video
+            start               (int|float [0])  float: seconds, int: frame, str: HH:MM:SS.mmm
+            nb_frames           (int [None]) None: all frames
+            end                 (int, float, str, None) overrides nb_frames
+            scale               (float [1])
+            stream              (int [0]) video stream to load
+            scale_aspect_ratio  (int [-1]) -1 downscale, 0 None, or upscale 1 aspect ratio ['sar']
+            to_rgb              (bool [False]) if fourcc and True: converts
+            crop                (tuple (w,h,x,y) [None])    -> crop=crop[0]:crop[1]}crop[2]:crop[3]
+            compressed          (bool [False]) if fourcc and True: return list of arrays
+            dtpye               (np.dtype [np.float32])
+        kwargs
+            pix_fmt             convert to pix_fmt before to_numpy()
+            channel_axis        (int in -1, 0) -1: H,W,C  0: C,H,W
+            interpolation       (int in 0,1,2,4) 0 NEAR, 1 LINEAR, 2 CUBIC 4 LANCZOS
 
         """
         if not self.stats:
             self.get_video_stats(stream=stream)
         if compressed and to_rgb:
             compressed = False
+        assert start < self.stats['nb_frames'], f"start={start} is larger than \
+            nb_frames {self.stats['nb_frames']}"
 
         pix_fmt = kwargs.get('pix_fmt', self.stats['pix_fmt'])
         assert pix_fmt in self.fmts, f"pix_fmt {pix_fmt} not in:  {sorted(self.fmts.keys())}"
@@ -675,8 +655,9 @@ class FF():
                 out = out.transpose(0,3,1,2).copy(order='C')
 
         return out
-    
-    #   TODO REVISE 
+
+
+    #   TODO REVISE
     #,  from .utils import Col, CPUse, GPUse
     # def fits_in_memory(self, nb_frames=None, dtype_size=1, with_grad=0, scale=1, stream=0,
     #                    memory_type="GPU", step=1) -> int:
@@ -702,3 +683,33 @@ class FF():
     #         print(_msg)
     #         nb_frames = max_frames
     #     return nb_frames
+
+    # def playfiles(self, fname=None, folder=".", max_frames=None, fmt=('.jpg', '.jpeg', '.png'),):
+
+    #     imgs, start = self._io.get_images(folder=folder, name=fname, fmt=fmt, max_imgs=max_frames)
+
+    #     print(self.ffplay)
+    #     print(start)
+    #     print(self.ffplay)
+    #     print(self.ffplay)
+    #     if not imgs:
+    #         return None
+
+    #     _fcmd = [self.ffplay]
+    #     if start or start is not None:
+    #         _fcmd += ["-start_number", str(start)]
+    #     _fcmd += ['-i', imgs]
+
+    #     print(" ".join(_fcmd))
+    #     print("-------Interaction--------")
+    #     print(" 'q', ESC        Quit")
+    #     print(" 'f', LMDC       Full Screen")
+    #     print(" 'p', SPACE      Pause")
+    #     print(" '9'/'0'         Change Volume")
+    #     print(" 's'             Step one frame")
+    #     print("  RT,DN / LT,UP  10sec jump")
+    #     print("  RMC            jump to percentage of film")
+    #     print("--------------------------")
+    #     sp.call(_fcmd)
+
+    #     return True

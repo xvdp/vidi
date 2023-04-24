@@ -5,7 +5,7 @@ v.0.2 wipe simplified and rewritten
 
 Rewrittien to handle FourCC including correctly reading and higher bits formats 10,12,14 and 16 bit files. FourCC formats can be read and output to numpy or torch without RGB conversion, useful for learning grayscale and color separately.
 
-Used with ffmpeg versions 3.4 & 4.2
+Has been used with ffmpeg versions 3.4, 4.3, 5.1.2
 ---
 
 ### classes
