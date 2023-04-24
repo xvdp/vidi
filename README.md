@@ -1,12 +1,11 @@
 # VIDI Wrapper to FFMPEG for python / Linux
-
+v.0.2 wipe simplified and rewritten
 *   Linux only (for windows replace 'ffmpeg' with 'ffmpeg.exe' in vidi.ff.py - untested)
-*   requires ffmpeg installed in syste,
-*   v.0.2 wipe simplify and rewrite
+*   requires ffmpeg installed in system
 
-TODO: tests
+Rewrittien to handle FourCC including correctly reading and higher bits formats 10,12,14 and 16 bit files. FourCC formats can be read 
+
 ---
-
 
 ffmpeg wrpper classes
 
@@ -35,4 +34,10 @@ ffmpeg wrpper classes
     export_clip(videofile)
     get_formats()               # IO vidi subset of installed ffmpeg supported video formats
     images_to_video()           # creates video from images
+    yxx2rgb()                   # FourCC (YCC and YUV) to RGB
+    rgb2yxx()                   # RGB to FourCC (YCC and YUV)
+    yxx_matrix()
+    expand_fourcc() 4nm -> 444  # uncompress raw FourCC flat arrays to 3 channels
+    # todo expose compress_fourcc()
 
+### TODO: add unit tests / add multiprocessing FFDataset and test.
