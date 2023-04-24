@@ -299,7 +299,7 @@ def get_formats(supported: bool = True, unsupported: bool = False) -> dict:
         _fmts = _fi.read().split("\n")
     for _, _line in enumerate(_fmts[8:]):
         _fmt = _line.split()
-        if len(_fmt) == 4:
+        if len(_fmt) >= 4 and _fmt[2].isnumeric() and  _fmt[3].isnumeric():
             _issupported = False
             if not _fmt[1].endswith('be') and _fmt[1][:3] in _prefixes and \
                 _fmt[1] not in _not and all(n not in _fmt[1] for n in _notin):
