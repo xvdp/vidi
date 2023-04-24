@@ -7,7 +7,7 @@ Rewrittien to handle FourCC including correctly reading and higher bits formats 
 
 ---
 
-ffmpeg wrpper classes
+### classes
 
 **`vidi.FF`** # requires numpy, cv2
 
@@ -27,7 +27,7 @@ ffmpeg wrpper classes
         D.__len__()
 
 
-**`standalone functions`**
+### standalone functions
 
     make_subtitles(videofile)   # creates subtitle file with frame numbers
     export_frames(videofile)    # exports frame range to images
