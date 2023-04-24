@@ -1,14 +1,18 @@
-""" xvdp
+"""@xvdp
 util functions for vidi
-tested only in Ubuntu
+    Col                     print colors
+    frame_to_time(frame, fps)       -> seconds
+    frame_to_strftime(frame, fps)   -> HH:MM:SS.mmm
+    stftime(seconds)                -> HH:MM:SS.mmm
+    strftime_to_time(HH:MM:SS.mmm)  -> seconds
+    anytime_to_frame_time((HH:MM:SS.mmm, frame, secinds), fps) -> (frame, seconds)
 """
-from typing import Optional
+from typing import Optional, Union
 import subprocess as sp
 import time
 import numpy as np
 import psutil
 import torch
-
 
 
 class Col:
@@ -20,6 +24,94 @@ class Col:
     RB = '\033[91m\033[1m'
     B = '\033[1m'
 
+###
+#
+# frame, time, strftime conversions
+#
+
+def frame_to_time(frame: int, fps: float) -> float:
+    """frame -> seconds (int to float)
+    Args
+        frame   int
+        fps     float
+    """
+    outtime = frame/fps
+    return outtime
+
+
+def frame_to_strftime(frame: int, fps: float) -> str:
+    """frame -> HH:MM:SS.mmm, (int to str)
+    Args
+        frame   int     frame number
+        fps     float   frame rate
+    """
+    return strftime(frame_to_time(frame, fps))
+
+
+def time_to_frame(intime: float, fps: float) -> int:
+    """ seconds -> frame, (float to int)
+    Args
+        intime  float seconds
+        fps     float
+    """
+    return int(round(intime * fps))
+
+
+def strftime(intime: float) -> str:
+    """seconds -> HH:MM:SS.mmm"""
+    _t = int(intime)
+    return f"{(_t//3600)%24:02d}:{(_t//60)%60:02d}:{_t%60:02d}.{(int((intime - _t)*1000)):03d}"
+
+
+def strftime_to_time(instftime: str) -> float:
+    """ HH:MM:SS.mmm -> seconds
+    """
+    return round(sum(x * float(t) for x, t in zip([3600, 60, 1], instftime.split(":"))), 3)
+
+
+def anytime_to_frame_time(intime: Union[int, float, str],
+                          fps: float) -> tuple[int, float]:
+    """ returns (frame int, time float)
+    Args
+        intime     (str 'HH:MM:SS.mmm', float, int)
+        fps         (float)
+    """
+    if isinstance(intime, str):
+        intime = strftime_to_time(intime)
+
+    if isinstance(intime, float):
+        out_time = intime
+        out_frame = time_to_frame(intime, fps)
+    else: # int
+        out_frame = intime
+        out_time = frame_to_time(intime, fps)
+    return out_frame, out_time
+
+
+def tofloat32(uint8_value):
+    return uint8_value/np.array(255, dtype=np.float32)
+
+
+def validate_dtype(dtype, as_torch: bool = False):
+    if dtype in ("float", "float32"):
+        dtype = "float32"
+    elif dtype in ("double", "float64"):
+        dtype = "float64"
+    elif dtype in ("half", "float16"):
+        dtype = "float16"
+    elif dtype in ("uint", "uint8"):
+        dtype = "uint8"
+    else:
+        assert f"dtype <{dtype}> not recognized"
+    if as_torch:
+        dtype = torch.__dict__[dtype]
+    return dtype
+
+
+###
+#
+# Timer TODO revise. unused
+#
 class Timer:
     """ simple timing class
     """
@@ -107,38 +199,10 @@ def dtoc(timer, msg):
     if timer is not None:
         timer.toc(msg)
 
-def frame_to_time(frame: int, fps: float) -> float:
-    """convert frame number to time"""
-    outtime = frame/fps
-    return outtime
 
-def time_to_frame(intime: float, fps: float) -> int:
-    """ time in seconds to frame int"""
-    frame = int(intime * fps)
-    return frame
-
-def strftime(t: float) -> str:
-    """seconds to str"""
-    _t = int(t)
-    return f"{(_t//3600)%24:02d}:{(_t//60)%60:02d}:{_t%60:02d}.{(int((t - _t)*1000)):03d}"
-
-def tofloat32(uint8_value):
-    return uint8_value/np.array(255, dtype=np.float32)
-
-def validate_dtype(dtype, as_torch: bool = False):
-    if dtype in ("float", "float32"):
-        dtype = "float32"
-    elif dtype in ("double", "float64"):
-        dtype = "float64"
-    elif dtype in ("half", "float16"):
-        dtype = "float16"
-    elif dtype in ("uint", "uint8"):
-        dtype = "uint8"
-    else:
-        assert f"dtype <{dtype}> not recognized"
-    if as_torch:
-        dtype = torch.__dict__[dtype]
-    return dtype
+###
+# TODO revise, newer functions available
+#
 
 def get_smi(query):
     """reutrn nvidia-smi query"""

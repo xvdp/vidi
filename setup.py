@@ -1,4 +1,4 @@
-'''setup file for Vidi'''
+"""@xvdp"""
 
 from setuptools import setup, find_packages
 
@@ -16,7 +16,7 @@ def setup_package():
     ''' setup '''
     metadata = dict(
         name='vidi',
-        version=_set_version(version='0.18'),
+        version=_set_version(version='0.2'),
         description='modules to access video',
         url='http://github.com/xvdp/vidi',
         author='xvdp',

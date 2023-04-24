@@ -1,9 +1,19 @@
 """@xvdp
-File to handle ffmpeg requests
+ffmpeg wratpper classes
 
-torch.set_default_dtype(torch.float16)
-torch.get_default_dtype()
+    V = FF(videofile)
+    V.export_clip()
+    V.export_frames()
+    V.to_numpy()        # -> ndarray
+    V.make_subtitles()  # frame number and time subtitles
+    V.vlc()             # play with vlc
+    V.play()            # ffplay
+    V.stats             # ffprobe -> dict
 
+
+    with FFDataset(videofile) as D:
+        D.__getitem__() # -> torch tensor
+        D.__len__()
 """
 from typing import Union, Optional, Callable
 import warnings
@@ -12,14 +22,12 @@ import os.path as osp
 import subprocess as sp
 import json
 import numpy as np
-import cv2
 import matplotlib.pyplot as plt
 import torch
 from torch import Tensor
 
-
-from .utils import Col, CPUse, GPUse
-from .io_main import IO
+from .utils import frame_to_time, anytime_to_frame_time
+from .functional import read_frame, get_formats, check_format, _make_subtitles
 
 # pylint: disable=no-member
 # pylint: disable=invalid-name
@@ -27,31 +35,7 @@ from .io_main import IO
 
 class FF():
     """wrapper class to ffmpeg, ffprobe, ffplay
-        Examples:
-            >>> from vidi import FF
-            >>> f = FF('MUCBCN.mp4')
-            >>> print(f.stats)
-            >>> c = f.clip(start=100, nb_frames=200) #output video clip
-            # output scalled reformated video clip
-            >>> d = f.clip(start=500, nb_frames=300, out_format=".webm", scale=0.25)
-            # output images
-            >>> e = f.get_frames(out_format='.png', start=100, nb_frames=5, scale=0.6)
-            >>> f.play(c)
 
-
-    v = FF(<myvideofile>)
-    Image.fromarray(V.to_numpy(start='00:03:47.933',nb_frames=1)[0]).save('C_000347933'.png')
-    Image.fromarray(V.to_numpy(start=6838, nb_frames=1)[0]).save('C_6838.png') 
-        -> at fps=30. is identical  strftime(6838/30) == '00:03:47.933'
-    V.export_frames(start='00:03:47.933', nb_frames=1)
-    V.export_frames(start=6838, nb_frames=1)
-    V.export_frames(start=6838, end=6839)
-    V.export_frames(start=227.933, nb_frames=1)
-         -> at fps=30. is identical
-
-    V.export_clip(start='00:03:47.933', nb_frames=30, overwrite=True)
-    V.export_clip(start='00:03:47.933', end='00:03:48.933', overwrite=True)
-         -> at fps=30. is identical
     """
     def __init__(self, fname: str) -> None:
 
@@ -61,7 +45,6 @@ class FF():
         self.ffmpeg = 'ffmpeg'
         self.ffprobe = 'ffprobe'
         self.stats = {}
-        self._io = IO()
         self.file = fname
         self.get_video_stats()
         self.frame_range = []
@@ -164,80 +147,16 @@ class FF():
 
 
     def make_subtitles(self, name: Optional[str] = None, start_frame: int = 0) -> str:
-        """ Make a subtitle file with frame numbers and timestamps
-        as standalone gist https://gist.github.com/xvdp/ec64daaa6fa381d8ba02342801a51b37
-        return name of subtitle file
-
-        Args:
-            name        (str[None]) output name, default VideoName.srt
-            start_frame (int [0]) ffmpeg exports default ot 1
- 
-        # to load in ffplay
-        ffplay <video_fname> -vf subtitles=<subtitle_name>
-        # loads automatically in vlc provided name suffix is the same
-        vlc <video_fname>
-
-        # srt syntax
-        0                               # frame number: start_frame
-        00:00:00.000 --> 00:00:00.033   # from to time
-            0	00:00:00.000            # subtitle
-
-        1                               # next subtitle ...
-        00:00:00.033 --> 00:00:00.066
-            1	00:00:00.033
+        """ make frame/time subtitle file .srt
+        Args
+            name        (str [None]) name of subtitle file: default fname.replace(<.ext>, '.srt')
+            start_frame (int [0])
         """
+        fps = self.stats['rate']
+        nb_frames = self.stats['nb_frames']
         name = name if isinstance(name, str) else osp.splitext(osp.abspath(self.file))[0]
         name = name+'.srt' if '.srt' not in name else name
-        sub = ""
-        last_frame = self.frame_to_strftime(0)
-        for i in range(self.stats['nb_frames']):
-            _frame = i + start_frame
-            next_frame = self.frame_to_strftime(_frame+1)
-            sub += f"{_frame}\n{last_frame} --> {next_frame}\n\t{_frame}\t{last_frame}\n\n"
-            last_frame = next_frame
-
-        with open(name, 'w', encoding='utf8') as _fi:
-            _fi.write(sub)
-        return name
-
-
-    def frame_to_time(self, frame: int = 0) -> float:
-        """convert frame to time seconds
-        Args
-            frame   int
-        """
-        if not self.stats:
-            self.get_video_stats(stream=0)
-        return frame/self.stats['rate']
-
-    def frame_to_strftime(self, frame: int = 0) -> str:
-        """convert frame to time str HH:MM:SS.mmm
-        Args
-            frame   int
-        """
-        return self.strftime(self.frame_to_time(frame))
-
-    @staticmethod
-    def time_to_frame(intime: float, fps: float) -> int:
-        """ return frame number for time in seconds
-        Args
-            intime  float
-        """
-        return int(round(intime * fps))
-
-    @staticmethod
-    def strftime(intime: float) -> str:
-        """ time in seconds to HH:MM:SS.mmm
-        Args
-            intime  float
-        """
-        return '%02d:%02d:%02d.%03d'%((intime//3600)%24, (intime//60)%60, intime%60,
-                                      (int((intime - int(intime))*1000)))
-    @staticmethod
-    def strftime_to_time(instftime: str) -> float:
-        """ HH:MM:SS.mmm - > seconds
-        """
-        return round(sum(x * float(t) for x, t in zip([3600, 60, 1], instftime.split(":"))), 3)
+        return _make_subtitles(name, nb_frames, fps, start_frame)
 
 
     def build_filter_graph(self,
@@ -404,35 +323,35 @@ class FF():
         proc.wait()
         proc.stdout.close()
 
-    def playfiles(self, fname=None, folder=".", max_frames=None, fmt=('.jpg', '.jpeg', '.png'),):
+    # def playfiles(self, fname=None, folder=".", max_frames=None, fmt=('.jpg', '.jpeg', '.png'),):
 
-        imgs, start = self._io.get_images(folder=folder, name=fname, fmt=fmt, max_imgs=max_frames)
+    #     imgs, start = self._io.get_images(folder=folder, name=fname, fmt=fmt, max_imgs=max_frames)
 
-        print(self.ffplay)
-        print(start)
-        print(self.ffplay)
-        print(self.ffplay)
-        if not imgs:
-            return None
+    #     print(self.ffplay)
+    #     print(start)
+    #     print(self.ffplay)
+    #     print(self.ffplay)
+    #     if not imgs:
+    #         return None
 
-        _fcmd = [self.ffplay]
-        if start or start is not None:
-            _fcmd += ["-start_number", str(start)]
-        _fcmd += ['-i', imgs]
+    #     _fcmd = [self.ffplay]
+    #     if start or start is not None:
+    #         _fcmd += ["-start_number", str(start)]
+    #     _fcmd += ['-i', imgs]
 
-        print(" ".join(_fcmd))
-        print("-------Interaction--------")
-        print(" 'q', ESC        Quit")
-        print(" 'f', LMDC       Full Screen")
-        print(" 'p', SPACE      Pause")
-        print(" '9'/'0'         Change Volume")
-        print(" 's'             Step one frame")
-        print("  RT,DN / LT,UP  10sec jump")
-        print("  RMC            jump to percentage of film")
-        print("--------------------------")
-        sp.call(_fcmd)
+    #     print(" ".join(_fcmd))
+    #     print("-------Interaction--------")
+    #     print(" 'q', ESC        Quit")
+    #     print(" 'f', LMDC       Full Screen")
+    #     print(" 'p', SPACE      Pause")
+    #     print(" '9'/'0'         Change Volume")
+    #     print(" 's'             Step one frame")
+    #     print("  RT,DN / LT,UP  10sec jump")
+    #     print("  RMC            jump to percentage of film")
+    #     print("--------------------------")
+    #     sp.call(_fcmd)
 
-        return True
+    #     return True
 
 
     def _export(self,
@@ -457,28 +376,6 @@ class FF():
         return cmd
 
 
-    def anytime_to_frame_time(self,
-                              in_time: Union[int, float, str],
-                              fps: Optional[float] = None) -> tuple[int, float]:
-        """ float seconds, HH:MM:SS.mmm str or int frame to (int frame, float seconds)
-        Args
-            in_time     (str 'HH:MM:SS.mmm', float, int)
-            fps         (float)
-        """
-        fps = fps if fps is not None else self.stats['rate']
-        if isinstance(in_time, str):
-            in_time = self.strftime_to_time(in_time)
-
-        if isinstance(in_time, float):
-            out_time = in_time
-            out_frame = self.time_to_frame(in_time, fps)
-        else: # int
-            out_frame = in_time
-            out_time = self.frame_to_time(in_time)
-
-        return out_frame, out_time
-
-
     def _start_end_time(self,
                         start: Union[int, float, str] = 0,
                         nb_frames: Optional[int] = None,
@@ -495,18 +392,18 @@ class FF():
         out = []
         start_frame = 0
         if start or nb_frames is not None or end is not None:
-            start_frame, start_time = self.anytime_to_frame_time(start, fps)
+            start_frame, start_time = anytime_to_frame_time(start, fps)
 
             _max = self.stats['nb_frames'] - start_frame
             if end is not None:
-                end_frame, end_time = self.anytime_to_frame_time(end, fps)
+                end_frame, end_time = anytime_to_frame_time(end, fps)
                 nb_frames = min(end_frame - start_frame, _max)
                 assert nb_frames > 0, f"end time {end} must be later than start {start}"
             elif nb_frames is not None:
                 nb_frames = min(_max, nb_frames)
             else:
                 nb_frames = _max
-            end_time = self.frame_to_time(nb_frames)
+            end_time = frame_to_time(nb_frames, fps)
             out = [start_time, end_time]
         self.frame_range = [start_frame, nb_frames]
         return out
@@ -634,13 +531,10 @@ class FF():
         kwargs
             out_format  (str) in (".mov", ".mp4") format override
             crop        (list, tuple (w,h,x,y)
-        TODO: generate intermediate video with keyframes then cut
         ffmpeg -i a.mp4 -force_key_frames 00:00:09,00:00:12 out.mp4
-
         """
         cmd = self._export(start=start, nb_frames=nb_frames, end=end, scale=scale,
                            step=step, stream=stream, crop=kwargs.get('crop', None))
-
 
         _name, _format = osp.splitext(self.file)
         out_format = None
@@ -679,32 +573,6 @@ class FF():
         # proc.wait()
 
         return osp.abspath(out_name)
-
-
-    def fits_in_memory(self, nb_frames=None, dtype_size=1, with_grad=0, scale=1, stream=0,
-                       memory_type="GPU", step=1) -> int:
-        """
-            returns max number of frames that fit in memory
-        """
-        if not self.stats:
-            self.get_video_stats(stream=stream)
-
-        if nb_frames is None:
-            nb_frames = self.stats['nb_frames']
-        nb_frames = min(self.stats['nb_frames'], nb_frames)
-
-        _w = self.stats['width'] * scale
-        _h = self.stats['height'] * scale
-        _requested_ram = (nb_frames * _w * _h * dtype_size * (1 + with_grad))/step//2**20
-        _available_ram = CPUse().available if memory_type == "CPU" else GPUse().available
-
-        if _requested_ram > _available_ram:
-            max_frames = int(nb_frames * _available_ram // _requested_ram)
-            _msg = f"{Col.B}Cannot load [{nb_frames},{_h},{_w},3] frames in {memory_type} {Col.RB}"
-            _msg += f"{_available_ram} MB{Col.YB}, loading only {max_frames} frames {Col.AU}"
-            print(_msg)
-            nb_frames = max_frames
-        return nb_frames
 
 
     def view_frame(self,
@@ -813,10 +681,39 @@ class FF():
                 out = out.transpose(0,3,1,2).copy(order='C')
 
         return out
+    
+    #   TODO REVISE 
+    #,  from .utils import Col, CPUse, GPUse
+    # def fits_in_memory(self, nb_frames=None, dtype_size=1, with_grad=0, scale=1, stream=0,
+    #                    memory_type="GPU", step=1) -> int:
+    #     """
+    #         returns max number of frames that fit in memory
+    #     """
+    #     if not self.stats:
+    #         self.get_video_stats(stream=stream)
+
+    #     if nb_frames is None:
+    #         nb_frames = self.stats['nb_frames']
+    #     nb_frames = min(self.stats['nb_frames'], nb_frames)
+
+    #     _w = self.stats['width'] * scale
+    #     _h = self.stats['height'] * scale
+    #     _requested_ram = (nb_frames * _w * _h * dtype_size * (1 + with_grad))/step//2**20
+    #     _available_ram = CPUse().available if memory_type == "CPU" else GPUse().available
+
+    #     if _requested_ram > _available_ram:
+    #         max_frames = int(nb_frames * _available_ram // _requested_ram)
+    #         _msg = f"{Col.B}Cannot load [{nb_frames},{_h},{_w},3] frames in {memory_type} {Col.RB}"
+    #         _msg += f"{_available_ram} MB{Col.YB}, loading only {max_frames} frames {Col.AU}"
+    #         print(_msg)
+    #         nb_frames = max_frames
+    #     return nb_frames
+
 
 
 class FFDataset(FF):
-    """"""
+    """ WIP Dataset to output ffmpeg to torch tensors
+    """
     def __init__(self,
                  fname: str,
                  start: Union[int, float, str] = 0,
@@ -967,507 +864,3 @@ class FFDataset(FF):
 
         bits, *_ = check_format(self.pix_fmt)
         self._bufsize = self._get_bufsize(bits, nb_frames=1, crop=self.crop)
-
-
-def yxx_matrix(mode: str, invert: bool = False, dtype: np.dtype = np.float32) -> np.ndarray:
-    """ color conversion matrices
-    Args:
-        mode    (str) in (YUV_RGB_709, YCC_RGB_709, YCC_RGB_2020)
-        invert  (bool [False]) return inverse matrix
-    """
-    mat = {}
-    mat['YUV_RGB_709'] = np.array([[ 1.     ,  1.     ,  1.     ],
-                                   [ 0.     , -0.39465,  2.03211],
-                                   [ 1.13983, -0.5806 ,  0.     ]], dtype=dtype)
-    mat['YCC_RGB_709'] = np.array([[ 1.    ,  1.    ,  1.    ],
-                                   [ 0.    , -0.1873,  1.8556],
-                                   [ 1.5748, -0.4681,  0.    ]], dtype=dtype)
-    mat['YCC_RGB_2020'] = np.array([[ 1.        ,  1.        ,  1.        ],
-                                    [ 0.        , -0.16455313,  1.8814    ],
-                                    [ 1.4746    , -0.57135313,  0.        ]], dtype=dtype)
-
-    assert mode in mat, f"got {mode}, expected {list(mat.keys())}"
-    out = mat[mode]
-    if invert:
-        out = np.linalg.inv(out)
-    return out
-
-
-def rgb2yxx(rgb: np.ndarray, mode: str = 'YUV_RGB_709', clamp: bool = False) -> np.ndarray:
-    """ float rgb to yuv444 or ycc444
-    Args
-        rgb     (ndarray) shape (h,w,3) float
-        mode    (str [YUV_RGB_709]) color profile
-            (YUV_RGB_709, YCC_RGB_709, YCC_RGB_2020)
-        clamp   (bool [False]) clamp result to 0,1
-    """
-    mat = yxx_matrix(mode, True, dtype=rgb.dtype)
-    shape = rgb.shape
-    out = (rgb.reshape(-1,3) @ mat).reshape(shape)
-    out[..., 1] += 0.5
-    out[..., 2] += 0.5
-    if clamp:
-        out = np.clip(out, 0, 1)
-    return out
-
-
-def yxx2rgb(yuv: np.ndarray, mode: str = 'YUV_RGB_709', clamp: bool = False) -> np.ndarray:
-    """ float yuv444 or ycc444 to rgb
-    Args
-        yuv     (ndarray) shape (h,w,3) float
-        mode    (str [YUV_RGB_709]) color profile
-            (YUV_RGB_709, YCC_RGB_709, YCC_RGB_2020)
-        clamp   (bool [False]) clamp result to 0,1
-    """
-    mat = yxx_matrix(mode, False, dtype=yuv.dtype)
-    shape = yuv.shape
-    out = yuv.copy()
-    out[..., 1] -= 0.5
-    out[..., 2] -= 0.5
-    out = (out.reshape(-1,3) @ mat).reshape(shape)
-    if clamp:
-        out = np.clip(out, 0, 1)
-    return out
-
-
-def from_bits(x: Union[list, np.ndarray],
-              bits: int = 10,
-              dtype: np.dtype = np.float32) -> np.ndarray:
-    """ uilt to float
-    Args
-        x       (ndarray)
-        bits    (int [10]) number of bits of input data
-        dtype   (dtype [np.float32])
-    """
-    if isinstance(x, np.ndarray):
-        return  (x/(2**bits-1)).astype(dtype)
-
-    for i, y in enumerate(x):
-        x[i] = from_bits(y, bits, dtype)
-    return x
-
-
-def to_bits(x: np.ndarray, bits: int = 10, dtype: np.dtype = np.uint16) -> np.ndarray:
-    """ float to uint
-    """
-    return( x*(2**bits-1)).astype(dtype)
-
-
-def read_bytes(data: Union[str, bytes]) -> bytes:
-    """ read binary file or pass thru bytes
-    Args
-        data    (str | bytes)
-    """
-    if isinstance(data, str):
-        assert osp.isfile(data), f'expected file or bytes, no file <{data}> found'
-        with open(data, mode="rb") as _fi:
-            data = _fi.read()
-    assert isinstance(data, bytes), f'expected file or bytes got {type(data)}'
-    return data
-
-
-def get_formats(supported: bool = True, unsupported: bool = False) -> dict:
-    """ return available ffmpeg patterns and if this reader supports them
-    """
-    _notin = ('bgr444', '555', '565', '_byte', 'bgr4', 'rgb444', '410')
-    _not = ('rgb4', 'bgr8', 'rgb8', 'rgb4')
-    _prefixes = ('rgb', 'bgr', 'arg', 'abg', 'yuv', 'ayu', '0rg', '0bg')
-    out = {}
-    with os.popen("ffprobe -v quiet -pix_fmts") as _fi:
-        _fmts = _fi.read().split("\n")
-    for _, _line in enumerate(_fmts[8:]):
-        _fmt = _line.split()
-        if len(_fmt) == 4:
-            _issupported = False
-            if not _fmt[1].endswith('be') and _fmt[1][:3] in _prefixes and \
-                _fmt[1] not in _not and all(n not in _fmt[1] for n in _notin):
-                _issupported = True
-            if ((_issupported and supported) or (not _issupported and unsupported)):
-                out[_fmt[1]] = {'flags':_fmt[0].replace('.', ''),
-                                'channels': int(_fmt[2]),
-                                'bpp': int(_fmt[3])}
-                if supported and unsupported:
-                    out[_fmt[1]]['supported'] = _issupported
-    return out
-
-
-# def pix_formats
-
-def check_format(pix_fmt: str) -> tuple:
-    """ return list of channels with bits
-    only littleendian formats supported
-    # TODO simplify fourcc parsing & add alpha channel position
-
-    A bit redundant except for the yuv compression: ffprobe -pix_fmts returns info.
-    """
-    _supported_formats = get_formats()
-
-    out = None
-    order = None
-    fourcc = None
-    if pix_fmt in _supported_formats:
-
-        _pix_fmt = pix_fmt
-        if _pix_fmt.endswith('le'):
-            _pix_fmt = _pix_fmt[:-2]
-
-        if '64' in _pix_fmt:
-            out = [16,16,16,16]
-            order = _pix_fmt.split('64')[0]
-        elif '48' in _pix_fmt:
-            out = [16,16,16]
-            order = _pix_fmt.split('48')[0]
-        elif _pix_fmt in ('rgb24', 'rgb0', '0rgb', 'bgr24', 'bgr0', '0bgr'):
-            order = 'rgb' if 'rgb' in _pix_fmt else 'bgr'
-            out = [8,8,8]
-        elif _pix_fmt in ('bgra', 'rgba', 'abgr', 'argb'):
-            order = _pix_fmt
-            out = [8,8,8,8]
-
-        elif _pix_fmt[:3] == 'yuv':
-            order = 'yuv'
-            bits = 8
-            components = 3
-            j = 1
-            if _pix_fmt[-j].isnumeric():
-                while _pix_fmt[-j].isnumeric():
-                    j += 1
-                bits = int(_pix_fmt[-j+1:])
-            _pix_fmt = _pix_fmt.split('yuv')[1]
-            if not _pix_fmt[0].isnumeric():
-                if _pix_fmt[0] == 'a':
-                    order += 'a'
-                    components += 1
-                _pix_fmt = _pix_fmt[1:]
-            if not _pix_fmt[:3].isnumeric():
-                raise NotImplementedError(f"format not implemented {pix_fmt}")
-            out = [bits*int(c)/4 for c in _pix_fmt[:3]]
-            fourcc = [int(c) for c in _pix_fmt[:3]]
-            if components == 4:
-                out = out + [bits]
-                fourcc = fourcc + [fourcc[0]]
-    return out, order, fourcc # this could be simpler fourcc == out*bits/4
-
-
-def read_frame(buffer: Union[str, bytes],
-               pix_fmt: str,
-               width: int,
-               height: int,
-               channel_axis = -1,
-               interpolation: int = 1,
-               compressed: bool = False,
-               to_rgb: bool = False,
-               dtype: Union[str, np.dtype, None] = np.float32) -> Union[np.ndarray, list]:
-    """ bytes to ndarray ofor a single frame
-
-    Args
-        buffer  (str, bytes)    length of data needs to correspond to pix_fmt data packing
-        pix_fmt (str) little endian pix_fmt supported by ffmpeg in (rgb, bgr)/a or yuv/a fourcc
-            run .get_formats() to see currently implemented formats
-        width   (int) expected width
-        height  (int) expected out
-        interploation (int) 0 NEAR, 1 LINEAR, 2 CUBIC 4 LANCZOS
-        compressed      (bool [False]) for fourcc codecs, keep compression: returns list
-    """
-    buffer = read_bytes(buffer)
-    bits, _, fourcc = check_format(pix_fmt)
-    assert bits is not None, f"{pix_fmt} unsupported; use little endian, (rgb, rgb, yuv)(a)"
-
-    bitdepth = int(bits[0]) # will this be wrong for scaling bits?
-    channels = len(bits)
-    _dtype = np.uint8 if np.ceil(np.log2(bitdepth)) == 3 else np.uint16
-    frame = np.frombuffer(buffer, dtype=_dtype)
-
-
-    if fourcc is not None:
-        shape = (channels, height, width) if channel_axis == 0 else (height, width, channels)
-        out =  _expand_fourcc(frame, fourcc, shape, interpolation, channel_axis, compressed)
-    else:
-        out = []
-        _a0 = width * height
-        for i in range(channels):
-            out.append(frame[i*_a0:(i+1)*_a0].reshape(height, width))
-    if not compressed or all([out[0].shape == _a.shape for _a in out[1:]]):
-        out = np.stack(out, axis=channel_axis)
-
-    # convert to float in (0,1) range
-    if dtype is not None or (to_rgb and 'yuv' in pix_fmt):
-        dtype = dtype or np.float32
-        out = from_bits(out, int(bits[0]), dtype=dtype)
-
-    if isinstance(out, np.ndarray) and (to_rgb and 'yuv' in pix_fmt):
-        if 'ayuv' in pix_fmt:
-            out[..., 1:] = yxx2rgb(out[..., 1:], clamp=True)
-        elif 'yuva' in pix_fmt:
-            out[..., :-1] = yxx2rgb(out[..., :-1], clamp=True)
-        else:
-            out = yxx2rgb(out, clamp=True)
-
-    return out
-
-
-def _expand_fourcc(frame: np.ndarray,
-                   fourcc: tuple,
-                   shape: tuple,
-                   interpolation: int = 1,
-                   channel_axis: int = -1,
-                   compressed: bool = False) -> Union[np.ndarray, list]:
-    """ flat ndarray yuv | yuva 444, 440, 422, 420, 410 to stacked 444 ndarray
-    Args
-        frame   (ndarray) flat
-        fourcc  (tuple ) # four cc code expanded to include alpha
-        shape   (tuple) # shape of output array
-        interpolation   (int [1]) | 0: nearest | 1:linear | 2:cubic | 4:lanczos4
-        channel_axis     (int [-1]) | 0 :  CHW or HWC
-        compressed      (bool [False]) for fourcc codecs, keep compression: returns list
-    """
-    out = []
-    shape = list(shape)
-    channels = shape.pop(channel_axis)
-    height, width = shape
-
-    _area_ratio = sum(fourcc[1:3])/(fourcc[0]*2)
-    _width_ratio = fourcc[1]/fourcc[0]
-    _height_ratio = _area_ratio/_width_ratio
-
-    _area = width * height
-    _area_uv = int(_area_ratio * _area)
-    _width_uv = int(_width_ratio * width)
-    _height_uv =  int(_height_ratio * height)
-    _address = np.cumsum([_area, _area_uv, _area_uv])
-
-    out.append(frame[:_area].reshape(height, width))
-    for i in range(1,3):
-        data = frame[_address[i-1]:_address[i]].reshape(_height_uv, _width_uv)
-        if _area_ratio != 1 and not compressed:
-            data = cv2.resize(data, dsize=(width, height), interpolation=interpolation)
-        out.append(data)
-
-    if channels == 4:
-         out.append(frame[_address[-1]:].reshape(height, width))
-    return out
-
-
-def images_to_video(dst: str,
-                    src: str,
-                    start_number: Optional[int],
-                    overwrite: bool = False, **kwargs) -> str:
-    """ creates a video file from sequence of patterned images, default is  prores yuv422p10le 
-    Args
-        dst             (str) output file               e.g. metropolis_color.mov
-        src             (str) input patterned file      e.g. metro%08d.png
-        overwrite       (bool [False])
-        start_number    (int) source pattern start file_number # if concat enabled, make optional
-    kwargs
-        frame_rate      (float, str [24000/1001])  str in ('ntsc', 'pal', 'qntsc', 
-                                    'qpal', 'sntsc', 'spal', 'film', 'ntsc-film')
-        pix_fmt         (str ['yuv420p10le'])   in ffmpeg -pix_fmts | grep O
-        scale           (int, tuple, str)   str as f'{width}:{height}'
-        sar             (int) sample aspect ratio, if sar and no scale, scales appropriately
-        vcodec          (str ['prores']) huffyuv, h264, mjpeg, mpeg4, h264, ... in ffmpeg -codecs
-            profile     (str) ['hq'] # if vcodec == prores
-        color_trc       (str ['bt709']) | gamma22 gama28 linear, log, ,...
-        color_range     (str ['tv'])
-        field_order     (str ['progressive']) | tt, bb, tb, bt
-        time_base       (float [1/frame_rate])
-        timecode        (str)   # 01:20:10:05
-        vframes         (int)   # max number of frames to include
-
-    >>> src = 'some_file_%03d.png'
-    >>> cmd = images_to_video('TEST.mov', src, start_number=127, sar=2, overwrite=True, timecode="01:20:10:05")
-    >>> cmd = images_to_video('TEST.mov', src, start_number=127, frame_rate=24000/1001, scale=(512,512), pix_fmt="yuvj420p", vcodec="mjpeg", overwrite=True, b="128K", vframes=10)
-    """
-    def get_size(size: Union[str, tuple, int]) -> Optional[str]:
-        if isinstance(size, str) and size.isnumeric():
-            size = int(size)
-        if isinstance(size, int):
-            size = (size, size)
-        if isinstance(size, (tuple, list)):
-            size = f"{size[0]}:{size[1]}"
-        if isinstance(size, str) and len(size.split(':')) == 2:
-            return size
-        return None
-
-    def str_op(dic, key, val=None, prefix='-', conj=' '):
-        if key in dic or val is not None:
-            return f"{prefix}{key}{conj}{dic.get(key, val)}"
-        return ""
-
-    # output
-    # dst = osp.abspath(osp.expanduser(dst))
-    if osp.isfile(dst):
-        if not overwrite:
-            warnings.warn(f"No file written, {dst} exists, set overwrite=True")
-            return None
-        else:
-            dst = f"-y {dst}"
-
-    # frame rate
-    frame_rate = kwargs.get('frame_rate',  24000/1001)
-    _strrates = {'ntsc': 30000/1001, 'pal': 25/1, 'qntsc': 30000/1001 , 'qpal': 25/1,
-                 'sntsc': 30000/1001, 'spal': 25/1, 'film': 24/1 , 'ntsc-film': 24000/1001}
-    if isinstance(frame_rate, str):
-        frame_rate = _strrates[frame_rate]
-
-    # inputs
-    # concatenation has issues
-    # _file_list = None
-    # if osp.isdir(src):
-    #     src = [f.path for f in os.scandir(src)]
-
-    # if isinstance(src, (list, tuple)):
-    #     filetype = kwargs.get('filetype', 'file') #'movie'
-    #     if 'filetype' not in kwargs:
-    #         warnings.warn("concat 'filetype=' not passed assuming 'file")
-    #     _file_list = '_ffmpeg_concat.txt'
-    #     files = [f"{filetype} '{f}'\nduration {1/frame_rate}" for f in src]
-    #     with open (_file_list, 'a', encoding='utf8') as _fi:
-    #         _fi.write("\n".join(files))
-    #     src = f'-f concat -i {_file_list}'
-    # else:
-        # src = osp.abspath(osp.expanduser(src))
-    # if concat is fixed make start number optional
-    # start = str_op(kwargs, 'start_number') if '%' in src else ''
-
-    if '%' in src:
-        assert start_number is not None, f"start_number req' with patterned {src}"
-        start = f"-start_number {start_number}"
-    _test_src = src if '%' not in src else src%start_number
-    assert osp.isfile(_test_src), f"file {_test_src} not found"
-    src = f'-i {src}'
-
-    pix_fmt = str_op(kwargs, 'pix_fmt',  'yuv422p10le')
-    vcodec = str_op(kwargs, 'vcodec',  'prores_ks') # c:v'
-    vframes = str_op(kwargs, 'vframes', prefix=' -') # max num of frames to include
-
-    opts = [str_op(kwargs, 'color_range', 'tv'), # mpeg, pc, jpeg
-               str_op(kwargs, 'field_order', 'progressive'), # tt, bb, tb, bt
-               str_op(kwargs, 'time_base',  1/frame_rate)]
-
-    if 'prores_ks' in vcodec:
-        opts += [str_op(kwargs, 'profile', 'hq', conj=":v "),
-                 str_op(kwargs, 'color_trc', 'bt709'),]
-
-    scale = get_size(kwargs.get('scale'))
-    sar = kwargs.get('sar')
-    if sar:
-        opts += [str_op(kwargs, 'sar')]
-        if scale is None:
-            opts += [f"-vf scale='trunc(iw/{sar}):ih'"]
-    if scale is not None:
-        opts += [f"-vf scale={scale}"]
-
-    # TODO Add audio codec and options
-    _opts = ['b',        # bits/sec [200K]   -b 1200K (8000K)
-             'ab',       # audio bits/sec [128k]
-             'flags',    # mv
-             'ar',       # audio sampling Hz
-             'ac',       # audio channels
-            #  'b:a',      # audio bit rate 96k
-             'timecode'
-             ]      # sample aspect ratio
-
-    opts += [f" -{op} {val}" for op, val in kwargs.items() if op in _opts]
-    opts = " " + " ".join([o for o in opts if o])
-
-    cmd = f'ffmpeg {start} {src}{vframes} -r {frame_rate} {pix_fmt} {vcodec}'
-    cmd += f'{opts} {dst}'
-    if kwargs.get('run', True):
-        sp.call(cmd.split())
-    return cmd
-
-
-    # ffmpeg -r 29.97 -start_number 5468 -i metro%08d.png -vcodec libx264 -pix_fmt yuv420p \
-    #         /home/z/metropolis_color.mov 
-    # ffmpeg -r 29.97 -start_number 5468 -i metro%08d.png -vcodec libx264 -pix_fmt yuv420p \
-    #     -vframes 200 /home/z/metro_col.mov #only 200 frames
-
-
-    # ffmpeg -i input.mkv -map 0:v -map 0:a -map 0:s -c:s copy -c:a libopus -b:a 96k \
-    #     -pix_fmt yuv420p10le -c:v libsvtav1 -crf 30 -preset 7 output.mkv
-
-    # ffmpeg -i input.mkv  -c:s copy -c:a libopus -b:a 96k -pix_fmt yuv420p10le \
-    #     -c:v libsvtav1 -crf 30 -preset 7 output.mkv
-
-    # ffmprobe -encoders
-    # (abj) z@zXb:/mnt/Data/data/Proto$ ffprobe -encoders | grep prores
-    #     ffprobe version 4.3 Copyright (c) 2007-2020 the FFmpeg developers built with gcc 7.3.0 (crosstool-NG 1.23.0.449-a04d0)
-    #     configuration: --prefix=/opt/conda/conda-bld/ffmpeg_1597178665428/_h_env_placehold_placehold_placehold_placehold_
-    #     placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_
-    #     placehold_placehold_placehold_placehold_placehold_placeh
-    #         --cc=/opt/conda/conda-bld/ffmpeg_1597178665428/_build_env/bin/x86_64-conda_cos6-linux-gnu-cc --disable-doc --disable-openssl
-    #         --enable-avresample --enable-gnutls --enable-hardcoded-tables --enable-libfreetype --enable-libopenh264 --enable-pic
-    #         --enable-pthreads --enable-shared --disable-static --enable-version3 --enable-zlib --enable-libmp3lame
-    #     libavutil      56. 51.100 / 56. 51.100
-    #     libavcodec     58. 91.100 / 58. 91.100
-    #     libavformat    58. 45.100 / 58. 45.100
-    #     libavdevice    58. 10.100 / 58. 10.100
-    #     libavfilter     7. 85.100 /  7. 85.100
-    #     libavresample   4.  0.  0 /  4.  0.  0
-    #     libswscale      5.  7.100 /  5.  7.100
-    #     libswresample   3.  7.100 /  3.  7.100
-    #     VF.... prores               Apple ProRes
-    #     VF.... prores_aw            Apple ProRes (codec prores)
-    #     VFS... prores_ks            Apple ProRes (iCodec Pro) (codec prores)
-    #     https://ffmpeg.org/ffmpeg-codecs.html#ProRes
-
-    #     ffmpeg -i input.bmp -c:v jpeg2000 -layer_rates "100,10,1" output.j2k
-    #     ffmpeg -i input -c:v librav1e -b:v 500K -rav1e-params speed=5:low_latency=true output.mp4
-    #     ffmpeg -i input -c:v libaom-av1 -b:v 500K -aom-params tune=psnr:enable-tpl-model=1 output.mp4
-    #     ffmpeg -i INPUT -codec:v libtheora -q:v 10 OUTPUT.ogg
-    #     ffmpeg -i foo.mpg -c:v libx264 -x264opts keyint=123:min-keyint=20 -an out.mkv
-    #     ffmpeg -i input -c:v libx265 -x265-params crf=26:psy-rd=1 output.mp4
-    #     ffmpeg -i input -c:v libxavs2 -xavs2-params RdoqLevel=0 output.avs2
-
-    #     -c:v prores
-    #     -vcodec prores
-    #     -profile [proxy, lt, standard hq, 4444, 4444xq]
-    #     -quant_mat [auto, default, proxy, lt, standard, hq]
-    #     -bits_per_mb [200 - 2400  8000] 
-
-    # color_primaries integer (decoding/encoding,video) ‘bt709’ ‘bt2020’
-    # https://ffmpeg.org/ffmpeg-codecs.html#Video-Encoders
-    
-
-    #     ffprobe V204F-4A_TEST_WEDGE.mov
-    #     Duration: 00:00:07.88, start: 0.000000, bitrate: 1195427 kb/s
-    # Stream #0:0(eng): Video: prores (HQ) (apch / 0x68637061), yuv422p10le(tv, bt709, progressive), 4448x3096, 1195424 kb/s, SAR 2:1 DAR 1112:387, 23.98 fps, 23.98 tbr, 24k tbn, 24k tbc (default)
-    #     Metadata:
-    #         creation_time   : 2023-03-20T16:26:45.000000Z
-    #         handler_name    : Libquicktime Video Media Handler
-    #         encoder         : Apple ProRes 422 HQ
-    #         timecode        : 16:02:12:20
-
-            
-    # ffmpeg -r 23.976023976023978 -start_number 127 -i V204F-4A_TEST_FS/V204F-4A_TEST_WEDGE_8896_3096_%03d.png -pix_fmt yuv422p10le -c:v prores -color_range tv -field_order progressive -time_base 0.0417083 -color_trc bt709 TEST.MOV -vframes 5
-    # Stream #0:0: Video: prores (Standard) (apcn / 0x6E637061), yuv422p10le(tv, unknown/unknown/bt709, progressive), 8896x3096 [SAR 1:1 DAR 1112:387], q=2-31, 200 kb/s, 23.98 fps, 24k tbn, 23.98 tbc
-
-    # ffprobe TEST.mov
-    # Stream #0:0: Video: prores (Standard) (apcn / 0x6E637061), yuv422p10le(tv, progressive), 8896x3096, 594499 kb/s, SAR 1:1 DAR 1112:387, 23.98 fps, 23.98 tbr, 24k tbn, 24k tbc (default)
-
-    # Duration: 00:00:02.55, start: 0.000000, bitrate: 594318 kb/s
-    # # vframes doesnt clip number of frames
-    # # prores standard -> hq / try prores_ks
-    # # bitrate 594 499 -> 1 195 424
-    # # SAR 1:1 -> SAR 2:1
-
-    # ffmpeg -r 23.976023976023978 -start_number 127 -i V204F-4A_TEST_FS/V204F-4A_TEST_WEDGE_8896_3096_%03d.png -pix_fmt yuv422p10le -c:v prores_ks -profile hq -color_range tv -field_order progressive -time_base 0.04170833333333333 -color_trc bt709 TEST.MOV -vframes 5
-    # Stream #0:0: Video: prores (HQ) (apch / 0x68637061), yuv422p10le(tv, progressive), 8896x3096, 1628724 kb/s, SAR 1:1 DAR 1112:387, 23.98 fps, 23.98 tbr, 24k tbn, 24k tbc (default)
-    # Please use -profile:a or -profile:v, -profile is ambiguous
-    # # hq ok, bitrate ok
-
-    # ffmpeg -r 23.976023976023978 -start_number 127 -i V204F-4A_TEST_FS/V204F-4A_TEST_WEDGE_8896_3096_%03d.png -vframes 5 -pix_fmt yuv422p10le -c:v prores_ks -profile:v hq -color_range tv -field_order progressive -time_base 0.04170833333333333 -color_trc bt709 TEST.MOV
-    # # vrames ok.
-
-    # bitstream filters
-    # https://ffmpeg.org/ffmpeg-bitstream-filters.html
-    # ffmpeg -i INPUT -c copy -bsf:v prores_metadata=color_primaries=bt709:color_trc=bt709:colorspace=bt709 output.mov
-    # ffmpeg -i INPUT -c copy -bsf:v prores_metadata=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc output.mov
-
-    # display_aspect_ratio
-    # ffmpeg -i <INPUT_FILE> -aspect 720:540 -c copy [OUTPUT_FILE]
-    # sample_aspect_ratio
-    # https://superuser.com/questions/907933/correct-aspect-ratio-without-re-encoding-video-file
-    # ffmpeg -i in.mp4 -c copy -bsf:v "h264_metadata=sample_aspect_ratio=4/3" out.mp4
-
-    # -vf setsar=sar=4/3
