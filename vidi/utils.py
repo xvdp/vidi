@@ -10,9 +10,8 @@ util functions for vidi
 from typing import Optional, Union
 import subprocess as sp
 import time
-import numpy as np
 import psutil
-import torch
+
 
 
 class Col:
@@ -86,26 +85,6 @@ def anytime_to_frame_time(intime: Union[int, float, str],
         out_frame = intime
         out_time = frame_to_time(intime, fps)
     return out_frame, out_time
-
-
-def tofloat32(uint8_value):
-    return uint8_value/np.array(255, dtype=np.float32)
-
-
-def validate_dtype(dtype, as_torch: bool = False):
-    if dtype in ("float", "float32"):
-        dtype = "float32"
-    elif dtype in ("double", "float64"):
-        dtype = "float64"
-    elif dtype in ("half", "float16"):
-        dtype = "float16"
-    elif dtype in ("uint", "uint8"):
-        dtype = "uint8"
-    else:
-        assert f"dtype <{dtype}> not recognized"
-    if as_torch:
-        dtype = torch.__dict__[dtype]
-    return dtype
 
 
 ###

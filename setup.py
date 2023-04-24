@@ -1,5 +1,5 @@
 """@xvdp"""
-
+import os.path as osp
 from setuptools import setup, find_packages
 
 
@@ -12,6 +12,12 @@ def _set_version(version):
         _fi.write("version='"+version+"'")
         return version
 
+def _required(filename='requirements.txt'):
+    _pwd = osp.dirname(osp.realpath(__file__))
+    filename = osp.join(_pwd, filename)
+    with open(filename, 'r', encoding='utf8') as _fi:
+        return _fi.read().split()
+
 def setup_package():
     ''' setup '''
     metadata = dict(
@@ -22,8 +28,8 @@ def setup_package():
         author='xvdp',
         author_email='xvdpahlen@gmail.com',
         packages=find_packages(),
-        install_requires=['numpy>=1.15'],
         long_description=_readme(),
+        install_requires=_required(),
         zip_safe=False)
 
     setup(**metadata)

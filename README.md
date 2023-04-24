@@ -3,8 +3,9 @@ v.0.2 wipe simplified and rewritten
 *   Linux only (for windows replace 'ffmpeg' with 'ffmpeg.exe' in vidi.ff.py - untested)
 *   requires ffmpeg installed in system
 
-Rewrittien to handle FourCC including correctly reading and higher bits formats 10,12,14 and 16 bit files. FourCC formats can be read 
+Rewrittien to handle FourCC including correctly reading and higher bits formats 10,12,14 and 16 bit files. FourCC formats can be read and output to numpy or torch without RGB conversion, useful for learning grayscale and color separately.
 
+Used with ffmpeg versions 3.4 & 4.2
 ---
 
 ### classes
@@ -23,7 +24,7 @@ Rewrittien to handle FourCC including correctly reading and higher bits formats 
 **`vidi.FFDataset`** # requires pytorch
 
     with FFDataset(videofile) as D:
-        D.__getitem__() # -> torch tensor
+        D.__getitem__() # -> torch.tensor if torch installed else np.ndarray
         D.__len__()
 
 
