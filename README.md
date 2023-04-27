@@ -1,11 +1,12 @@
-# VIDI Wrapper to FFMPEG for python / Linux
+# VIDI 
+## Python wrapper to FFMPEG
 v.0.2 wipe simplified and rewritten
 *   Linux only (for windows replace 'ffmpeg' with 'ffmpeg.exe' in vidi.ff.py - untested)
-*   requires ffmpeg installed in system
 
-Rewrittien to handle FourCC including correctly reading and higher bits formats 10,12,14 and 16 bit files. FourCC formats can be read and output to numpy or torch without RGB conversion, useful for learning grayscale and color separately.
+Exposes a subset of ffmpeg functionality wrapped in functions. VIDI's main intention is interaction between video and array data, numpy and torch.
 
-Has been used with ffmpeg versions 3.4, 4.3, 5.1.2
+Converts RGB to and from FourCC and higher bits formats 10,12,14 and 16 bit files.
+
 ---
 
 ### classes
@@ -21,7 +22,7 @@ Has been used with ffmpeg versions 3.4, 4.3, 5.1.2
     V.play()            # ffplay
     V.stats             # ffprobe -> dict
 
-**`vidi.FFDataset`** # requires pytorch
+**`vidi.FFDataset`**
 
     with FFDataset(videofile) as D:
         D.__getitem__() # -> torch.tensor if torch installed else np.ndarray
@@ -41,4 +42,6 @@ Has been used with ffmpeg versions 3.4, 4.3, 5.1.2
     expand_fourcc() 4nm -> 444  # uncompress raw FourCC flat arrays to 3 channels
     # todo expose compress_fourcc()
 
-### TODO: add unit tests / add multiprocessing FFDataset and test.
+### TODO: 
+* unit tests; 
+* multiprocessing to torch dataset
