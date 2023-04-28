@@ -176,7 +176,7 @@ class FFDataset(FF):
         self._cmd += self.build_filter_graph(scale=self.scale,
                                              scale_aspect_ratio=self.scale_aspect_ratio,
                                              crop=self.crop)
-        self._cmd += ['-start_number', str(self.frame_range[0]), 
+        self._cmd += ['-start_number', str(self.frame_range[0]),
                       "-f", "image2pipe", "-pix_fmt", self.pix_fmt, "-vcodec", "rawvideo", "-"]
                     #   '-f', 'rawvideo',
                     #   '-pix_fmt', self.pix_fmt, 'pipe:']

@@ -601,7 +601,6 @@ class FF():
             pix_fmt             convert to pix_fmt before to_numpy()
             channel_axis        (int in -1, 0) -1: H,W,C  0: C,H,W
             interpolation       (int in 0,1,2,4) 0 NEAR, 1 LINEAR, 2 CUBIC 4 LANCZOS
-
         """
         if not self.stats:
             self.get_video_stats(stream=stream)

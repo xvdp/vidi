@@ -8,6 +8,7 @@ Formats and FourCC <-> RGB
     yxx_matrix()
     expand_fourcc() 4nm -> 444
 
+
 General IO
     read_frame()
     read_bytes()
@@ -88,7 +89,6 @@ def read_frame(buffer: Union[str, bytes],
     """
     buffer = read_bytes(buffer)
     bits, _, fourcc = check_format(pix_fmt)
-    assert bits is not None, f"{pix_fmt} unsupported; use little endian, (rgb, rgb, yuv)(a)"
 
     bitdepth = int(bits[0]) # will this be wrong for scaling bits?
     channels = len(bits)
@@ -121,6 +121,75 @@ def read_frame(buffer: Union[str, bytes],
             out = yxx2rgb(out, clamp=True)
 
     return out
+
+
+def rgb_to_yuv(frame: np.ndarray,
+               pix_fmt: str,
+               compress: bool = True,
+               interpolation: int = 1) -> Union[list, np.ndarray]:
+    """if compress: returns list, otherwise ndarray, both IO are floats
+    Args
+        frame           np.ndarray ndim 3, float
+        pix_fmt
+        compress        (bool [True])   # yuv compression 422 etc
+        interpolation   (int) 0 NEAR, 1 LINEAR, 2 CUBIC 4 LANCZOs:
+    """
+    assert 'yuv' in pix_fmt
+
+    bits, _, fourcc = check_format(pix_fmt)
+
+    channels = len(bits)
+    channel_axis = _get_channels_axis(frame.shape, channels)
+    out = frame.copy()
+
+    if channel_axis == 0:
+        out = out.transpose(1,2,0) # mm is simpler as HWC
+    _s = slice(1 if 'ayuv' in pix_fmt else 0, -1 if 'yuva' in pix_fmt else None)
+    out[..., _s] = rgb2yxx(out[..., _s], mode='YUV_RGB_709', clamp=True)
+
+    if compress:
+        out =  compress_fourcc(out, fourcc, interpolation)
+    return out
+
+
+def write_frame(frame: np.ndarray,
+                pix_fmt: str,
+                from_rgb: bool = False,
+                compress: bool = True,
+                interpolation: int = 1) -> bytes:
+    """  (HWC | CHW) ndarray to flat buffer
+    Converts RGB to YUV if pix_fmt is yuv and from_rgb == True
+    
+
+    Args
+        frame   (np.ndarray) HWC or CHW, float( 0-1)
+        pix_fmt (str) little endian pix_fmt supported by ffmpeg in (rgb, bgr)/a or yuv/a fourcc
+            run .get_formats() to see currently implemented formats
+        from_rgb        (bool [False]) # if pix_fmt is yuv- and True, convert channels
+        compress        (bool [True])   # yuv compression
+        interploation   (int) 0 NEAR, 1 LINEAR, 2 CUBIC 4 LANCZOS: for yuv compression
+
+    """
+    bits, _, fourcc = check_format(pix_fmt)
+
+    # convert to yuvcompress
+    if 'yuv' in pix_fmt and from_rgb:
+        frame = rgb_to_yuv(frame, pix_fmt, compress, interpolation)
+    elif 'yuv' in pix_fmt and compress:
+        frame =  compress_fourcc(frame, fourcc, interpolation)
+
+    if not isinstance(frame, list):
+        channels = len(bits)
+        channel_axis = _get_channels_axis(frame.shape, channels)
+        frame = [np.squeeze(f, channel_axis) for f in np.split(frame, channels, axis=channel_axis)]
+
+    # flat array
+    out = np.concatenate([o.reshape(-1) for o in frame])
+
+    # to buffer ready data
+    bitdepth = int(bits[0])
+    dtype = np.uint8 if np.ceil(np.log2(bitdepth)) == 3 else np.uint16
+    return to_bits(out, bitdepth, dtype=dtype).tobytes()
 
 
 def from_bits(x: Union[list, np.ndarray],
@@ -158,6 +227,32 @@ def read_bytes(data: Union[str, bytes]) -> bytes:
     assert isinstance(data, bytes), f'expected file or bytes got {type(data)}'
     return data
 
+def get_size(size: Union[str, tuple, int]) -> Optional[str]:
+    if isinstance(size, str) and size.isnumeric():
+        size = int(size)
+    if isinstance(size, int):
+        size = (size, size)
+    if isinstance(size, (tuple, list)):
+        size = f"{size[0]}:{size[1]}"
+    if isinstance(size, str) and len(size.split(':')) == 2:
+        return size
+    return None
+
+def str_op(dic, key, val=None, prefix='-', conj=' ') -> str:
+    if key in dic or val is not None:
+        return f"{prefix}{key}{conj}{dic.get(key, val)}"
+    return ""
+
+
+def get_frame_rate(frame_rate: Union[float, str]) -> float:
+    """ resolve frame rate from str
+    """
+    _strrates = {'ntsc': 30000/1001, 'pal': 25/1, 'qntsc': 30000/1001 , 'qpal': 25/1,
+                 'sntsc': 30000/1001, 'spal': 25/1, 'film': 24/1 , 'ntsc-film': 24000/1001}
+    if isinstance(frame_rate, str):
+        frame_rate = _strrates[frame_rate]
+    return frame_rate
+
 
 def images_to_video(dst: str,
                     src: str,
@@ -187,22 +282,9 @@ def images_to_video(dst: str,
     >>> src = 'some_file_%03d.png'
     >>> cmd = images_to_video('TEST.mov', src, start_number=127, sar=2, overwrite=True, timecode="01:20:10:05")
     >>> cmd = images_to_video('TEST.mov', src, start_number=127, frame_rate=24000/1001, scale=(512,512), pix_fmt="yuvj420p", vcodec="mjpeg", overwrite=True, b="128K", vframes=10)
-    """
-    def get_size(size: Union[str, tuple, int]) -> Optional[str]:
-        if isinstance(size, str) and size.isnumeric():
-            size = int(size)
-        if isinstance(size, int):
-            size = (size, size)
-        if isinstance(size, (tuple, list)):
-            size = f"{size[0]}:{size[1]}"
-        if isinstance(size, str) and len(size.split(':')) == 2:
-            return size
-        return None
 
-    def str_op(dic, key, val=None, prefix='-', conj=' '):
-        if key in dic or val is not None:
-            return f"{prefix}{key}{conj}{dic.get(key, val)}"
-        return ""
+    >>> cmd = images_to_video(dst = "Merged.mov", src=f, start_number=170)
+    """
 
     # output
     # dst = osp.abspath(osp.expanduser(dst))
@@ -214,11 +296,8 @@ def images_to_video(dst: str,
             dst = f"-y {dst}"
 
     # frame rate
-    frame_rate = kwargs.get('frame_rate',  24000/1001)
-    _strrates = {'ntsc': 30000/1001, 'pal': 25/1, 'qntsc': 30000/1001 , 'qpal': 25/1,
-                 'sntsc': 30000/1001, 'spal': 25/1, 'film': 24/1 , 'ntsc-film': 24000/1001}
-    if isinstance(frame_rate, str):
-        frame_rate = _strrates[frame_rate]
+    frame_rate = get_frame_rate(kwargs.get('frame_rate',  24000/1001))
+
 
     # inputs
     # concatenation has issues
@@ -320,52 +399,53 @@ def check_format(pix_fmt: str) -> tuple:
 
     A bit redundant except for the yuv compression: ffprobe -pix_fmts returns info.
     """
-    _supported_formats = get_formats()
+    _supported = get_formats()
+    assert pix_fmt in _supported, f"{pix_fmt} unsupported, use {sorted(list(_supported.keys()))}"
 
     out = None
     order = None
     fourcc = None
-    if pix_fmt in _supported_formats:
 
-        _pix_fmt = pix_fmt
-        if _pix_fmt.endswith('le'):
-            _pix_fmt = _pix_fmt[:-2]
+    _pix_fmt = pix_fmt
+    if _pix_fmt.endswith('le'):
+        _pix_fmt = _pix_fmt[:-2]
 
-        if '64' in _pix_fmt:
-            out = [16,16,16,16]
-            order = _pix_fmt.split('64')[0]
-        elif '48' in _pix_fmt:
-            out = [16,16,16]
-            order = _pix_fmt.split('48')[0]
-        elif _pix_fmt in ('rgb24', 'rgb0', '0rgb', 'bgr24', 'bgr0', '0bgr'):
-            order = 'rgb' if 'rgb' in _pix_fmt else 'bgr'
-            out = [8,8,8]
-        elif _pix_fmt in ('bgra', 'rgba', 'abgr', 'argb'):
-            order = _pix_fmt
-            out = [8,8,8,8]
+    if '64' in _pix_fmt:
+        out = [16,16,16,16]
+        order = _pix_fmt.split('64')[0]
+    elif '48' in _pix_fmt:
+        out = [16,16,16]
+        order = _pix_fmt.split('48')[0]
+    elif _pix_fmt in ('rgb24', 'rgb0', '0rgb', 'bgr24', 'bgr0', '0bgr'):
+        order = 'rgb' if 'rgb' in _pix_fmt else 'bgr'
+        out = [8,8,8]
+    elif _pix_fmt in ('bgra', 'rgba', 'abgr', 'argb'):
+        order = _pix_fmt
+        out = [8,8,8,8]
 
-        elif _pix_fmt[:3] == 'yuv':
-            order = 'yuv'
-            bits = 8
-            components = 3
-            j = 1
-            if _pix_fmt[-j].isnumeric():
-                while _pix_fmt[-j].isnumeric():
-                    j += 1
-                bits = int(_pix_fmt[-j+1:])
-            _pix_fmt = _pix_fmt.split('yuv')[1]
-            if not _pix_fmt[0].isnumeric():
-                if _pix_fmt[0] == 'a':
-                    order += 'a'
-                    components += 1
-                _pix_fmt = _pix_fmt[1:]
-            if not _pix_fmt[:3].isnumeric():
-                raise NotImplementedError(f"format not implemented {pix_fmt}")
-            out = [bits*int(c)/4 for c in _pix_fmt[:3]]
-            fourcc = [int(c) for c in _pix_fmt[:3]]
-            if components == 4:
-                out = out + [bits]
-                fourcc = fourcc + [fourcc[0]]
+    elif _pix_fmt[:3] == 'yuv':
+        order = 'yuv'
+        bits = 8
+        components = 3
+        j = 1
+        if _pix_fmt[-j].isnumeric():
+            while _pix_fmt[-j].isnumeric():
+                j += 1
+            bits = int(_pix_fmt[-j+1:])
+        _pix_fmt = _pix_fmt.split('yuv')[1]
+        if not _pix_fmt[0].isnumeric():
+            if _pix_fmt[0] == 'a':
+                order += 'a'
+                components += 1
+            _pix_fmt = _pix_fmt[1:]
+        if not _pix_fmt[:3].isnumeric():
+            raise NotImplementedError(f"format not implemented {pix_fmt}")
+        out = [bits*int(c)/4 for c in _pix_fmt[:3]]
+        fourcc = [int(c) for c in _pix_fmt[:3]]
+        if components == 4:
+            out = out + [bits]
+            fourcc = fourcc + [fourcc[0]]
+
     return out, order, fourcc # this could be simpler fourcc == out*bits/4
 
 
@@ -434,18 +514,18 @@ def yxx2rgb(yuv: np.ndarray, mode: str = 'YUV_RGB_709', clamp: bool = False) -> 
 
 
 def expand_fourcc(frame: np.ndarray,
-                   fourcc: tuple,
-                   shape: tuple,
-                   interpolation: int = 1,
-                   channel_axis: int = -1,
-                   compressed: bool = False) -> Union[np.ndarray, list]:
+                  fourcc: tuple,
+                  shape: tuple,
+                  interpolation: int = 1,
+                  channel_axis: int = -1,
+                  compressed: bool = False) -> Union[np.ndarray, list]:
     """ flat ndarray yuv | yuva 444, 440, 422, 420, 410 to stacked 444 ndarray
     Args
         frame   (ndarray) flat
         fourcc  (tuple ) # four cc code expanded to include alpha
         shape   (tuple) # shape of output array
         interpolation   (int [1]) | 0: nearest | 1:linear | 2:cubic | 4:lanczos4
-        channel_axis     (int [-1]) | 0 :  CHW or HWC
+        channel_axis    (int [-1]) | 0 :  CHW or HWC
         compressed      (bool [False]) for fourcc codecs, keep compression: returns list
     """
     out = []
@@ -473,3 +553,42 @@ def expand_fourcc(frame: np.ndarray,
     if channels == 4:
         out.append(frame[_address[-1]:].reshape(height, width))
     return out
+
+def _get_channels_axis(shape: tuple, num_channels: int) -> int:
+    channel_axis = -1 if shape[-1] == num_channels else 0
+    assert shape[channel_axis] == num_channels, \
+        f"neither dim 0 nor -1 has {num_channels} channels: {shape}"
+    return channel_axis
+
+
+def compress_fourcc(frame: np.ndarray,
+                    fourcc: tuple,
+                    interpolation: int = 1) -> list[np.ndarray]:
+    """ stacked 444 ndarray to  flat ndarray yuv | yuva 444, 440, 422, 420, 410
+    Args
+        frame   (ndarray) stacked ndim =  3
+        fourcc  (tuple ) # four cc code expanded to include alpha
+        interpolation   (int [1]) | 0: nearest | 1:linear | 2:cubic | 4:lanczos4
+    """
+    assert frame.ndim == 3, f"expected HWC or CHW, got {frame.shape}"
+    channel_axis = _get_channels_axis(frame.shape, len(fourcc))
+
+    shape = list(frame.shape)
+    channels = shape.pop(channel_axis)
+    height, width = shape
+
+    data = [np.squeeze(f, channel_axis) for f in  np.split(frame, channels, axis=channel_axis)]
+
+    _area_ratio = sum(fourcc[1:3])/(fourcc[0]*2)
+    if _area_ratio < 1:
+        _width_ratio = fourcc[1]/fourcc[0]
+        _height_ratio = _area_ratio/_width_ratio
+        _width_uv = int(_width_ratio * width)
+        _height_uv =  int(_height_ratio * height)
+
+        for i, d in enumerate(data):
+            if i in (1, 2):
+                data[i] = cv2.resize(data[i], dsize=(_width_uv, _height_uv),
+                                    interpolation=interpolation)
+
+    return data
