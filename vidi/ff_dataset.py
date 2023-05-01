@@ -3,6 +3,7 @@ AVDataset legacy. todo validate against ffdb
 
 
 """
+import warnings
 from typing import Union, Optional
 import platform
 import subprocess as sp
@@ -54,6 +55,7 @@ try:
                 ftransform = ftransform=["edgedetect=mode=colormix:high=0"] # cartoon colorization
                 ftransform = ftransform=["edgedetect=mode=canny:low=0.3:high=0.5"] # canny
             """
+            warnings.warn("vidi.AVDataset will be deprecated in v.0.2.4; migrate to vidi.FFDataset")
             self.debug = debug
 
             self.src = src
