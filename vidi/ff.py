@@ -578,7 +578,7 @@ class FF():
         if vcodec is not None:
             cmd += ["-c:v", vcodec]
         if acodec is not None:
-            cmd += ["-c:v", vcodec]
+            cmd += ["-c:a", acodec]
 
         if 'bitrate' in kwargs:
             cmd +=  ['-bitrate', kwargs['bitrate']]
