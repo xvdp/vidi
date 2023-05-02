@@ -392,6 +392,31 @@ def get_formats(supported: bool = True, unsupported: bool = False) -> dict:
     return out
 
 
+def get_encoders() -> list:
+    """ return available ffmpeg patterns and if this reader supports them
+    """
+    video = []
+    audio = []
+    with os.popen("ffprobe -v quiet -encoders") as _fi:
+        _encs = _fi.read().split("\n")
+    for i, _enc in enumerate(_encs[10:]):
+        _test =  _enc.replace(' ','')
+        if _test and _test[0] == 'V':
+            video.append(_enc.split()[1])
+        elif _test and _test[0] == 'A':
+            audio.append(_enc.split()[1])
+    return video, audio
+
+def check_video_encoder(vcodec: str) -> bool:
+    """ validates that requested encoder is in ffmpeg version
+    """
+    return vcodec in get_encoders()[0]
+
+def check_audio_encoder(acodec: str) -> bool:
+    """ validates that requested encoder is in ffmpeg version
+    """
+    return acodec in get_encoders()[1]
+
 def check_format(pix_fmt: str) -> tuple:
     """ return list of channels with bits
     only littleendian formats supported

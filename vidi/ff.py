@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 
 
 from .utils import frame_to_time, anytime_to_frame_time
-from .functional import read_frame, get_formats, check_format, _make_subtitles
+from .functional import read_frame, get_formats, check_format, _make_subtitles, get_encoders
 
 # pylint: disable=no-member
 # pylint: disable=invalid-name
@@ -477,6 +477,46 @@ class FF():
 
         return cmd, out_files
 
+    @staticmethod
+    def _codec_checks(fmt, vcodec=None, acodec=None) -> tuple:
+        """
+        """
+        vcodecs, acodecs = get_encoders()
+        if vcodec is None:
+            if fmt == ".webm":
+                _vcs = [v for v in ['libvpx', 'libvpx-vp9'] if v in vcodecs]
+                assert _vcs, ".webm libvpx codecs not found in ffmpeg version"
+                vcodec = _vcs[0]
+            elif fmt == ".ogg":
+                assert 'libtheora' in vcodecs, ".ogg libtheora not found in ffmpeg version"
+                vcodec = 'libtheora'
+            elif fmt == ".mp4":
+                _vcs = [v for v in ['libx264', 'libopenh264'] if v in vcodecs]
+                assert _vcs, ".mp4 libx264 codecs not found in ffmpeg version"
+                vcodec = _vcs[0]
+            elif fmt == ".gif":
+                pass
+            else:
+                vcodec = "copy"
+        else:
+            assert vcodec in vcodecs, f"encoder {vcodec} not found, use {vcodecs}"
+
+        if acodec is None:
+            if fmt == ".webm":
+                assert 'libvorbis'  in acodecs, ".webm libvorbis not found in ffmpeg version"
+                acodec = 'libvorbis'
+            elif fmt == ".ogg":
+                assert 'vorbis' in acodecs, ".ogg libtheora not found in ffmpeg version"
+                acodec = 'vorbis'
+            elif fmt == ".gif":
+                pass
+            else:
+                acodec = "copy"
+        else:
+            assert acodec in acodecs, f"encoder {acodec} not found, use {acodecs}"
+        return vcodec, acodec
+
+
 
     def export_clip(self,
                     out_name: Optional[str] = None,
@@ -484,22 +524,31 @@ class FF():
                     nb_frames: Optional[int] = None,
                     end: Union[int, float, str, None] = None,
                     scale: Union[float, tuple[float, float]] = 1.,
+                    vcodec: Optional[str] = None,
+                    acodec: Optional[str] = None,
                     step: int = 1,
                     stream: int = 0,
                     out_folder: str = None,
                     overwrite: bool = False,
                     **kwargs):
-        """ extract video clip
+        """ extract video clip - by default copies codecs
         Args:
             out_name    (str [None]) default is <input_name>_framein_frame_out<input_format>
             start       (int | float [0])  default: start of input clip, if float: time
             nb_frames   (int [None]):      default: to end of clip
             end         (int, float, str, None) overrides nb_frames
             scale       (float [1]) rescale output
+            vcodec      (str [None]) default to copy unless for web (webm, ogg, mp4)
+                for web use:
+                    -vcodec libx24 + mp4  -b:v 8192k -f segment -segment_time 4
+                    -vcodec libtheora + .ogg -acodec vorbis
+                    -vcodec libvpx -acodec libvorbis
+            vcodec      (str [None]) default to copy unless for web (webm, ogg, mp4)
             stream      (int [0]) if more than one stream in video
         kwargs
             out_format  (str) in (".mov", ".mp4") format override
             crop        (tuple (w,h,x,y) [None])    -> crop=crop[0]:crop[1]}crop[2]:crop[3]
+            bitrate     (str) eg. 8192k
         ffmpeg -i a.mp4 -force_key_frames 00:00:09,00:00:12 out.mp4
         """
         cmd = self._export(start=start, nb_frames=nb_frames, end=end, scale=scale,
@@ -525,18 +574,26 @@ class FF():
             os.makedirs(out_folder, exist_ok=True)
             out_name = osp.join(out_folder, osp.basename(out_name))
 
+        vcodec, acodec = self._codec_checks(out_format, vcodec, acodec)
+        if vcodec is not None:
+            cmd += ["-c:v", vcodec]
+        if acodec is not None:
+            cmd += ["-c:v", vcodec]
+
+        if 'bitrate' in kwargs:
+            cmd +=  ['-bitrate', kwargs['bitrate']]
+        elif out_format in (".gif", ".webm"):
+            cmd +=  ['-bitrate', "3000K"]
+        elif out_format == ".mp4":
+            cmd +=  ['-bitrate', "8192K"]
 
         if osp.isfile(out_name):
             assert overwrite, "file exists set overwrite=True"
             cmd.insert(1, '-y')
 
-        if out_format == '.gif' or out_format == '.webm':
-            cmd = cmd + ['-bitrate', '3000k']
-        else:
-            cmd += ["-c:a", "copy"]
 
         cmd.append(out_name)
-        print(f"exporting clip {out_name} frames ({start}-{nb_frames+start_frame})\n {cmd}")
+        print(f"exporting clip {out_name} frames ({start}-{nb_frames+start})\n {cmd}")
         sp.call(cmd)
         # proc = sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE, stdout=sp.PIPE)
         # proc.wait()
