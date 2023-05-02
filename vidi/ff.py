@@ -85,7 +85,11 @@ class FF():
             _sar = [float(a) for a in (_stats['sample_aspect_ratio'].split(':'))]
             self.stats['sar'] = _sar[0]/_sar[1]
 
-        self.stats['bpp'] = int(_stats['bits_per_raw_sample'])
+        if 'bits_per_raw_sample' in stats:
+            self.stats['bpp'] = int(_stats['bits_per_raw_sample'])
+        else:
+            _bps, *_ = check_format('yuv420p')
+            self.stats['bpp'] = int(_bps[0])
 
         if 'width' in _stats and 'height'in _stats:
             self.stats['width'] = _stats['width']
@@ -532,7 +536,7 @@ class FF():
             cmd += ["-c:a", "copy"]
 
         cmd.append(out_name)
-        print(cmd)
+        print(f"exporting clip {out_name} frames ({start}-{nb_frames+start_frame})\n {cmd}")
         sp.call(cmd)
         # proc = sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE, stdout=sp.PIPE)
         # proc.wait()
