@@ -192,7 +192,7 @@ def write_frame(frame: np.ndarray,
     return to_bits(out, bitdepth, dtype=dtype).tobytes()
 
 
-def from_bits(x: Union[list, np.ndarray],
+def from_bits(x: Union[list[np.ndarray], np.ndarray],
               bits: int = 10,
               dtype: np.dtype = np.float32) -> np.ndarray:
     """ uilt to float
@@ -282,7 +282,6 @@ def images_to_video(dst: str,
     >>> src = 'some_file_%03d.png'
     >>> cmd = images_to_video('TEST.mov', src, start_number=127, sar=2, overwrite=True, timecode="01:20:10:05")
     >>> cmd = images_to_video('TEST.mov', src, start_number=127, frame_rate=24000/1001, scale=(512,512), pix_fmt="yuvj420p", vcodec="mjpeg", overwrite=True, b="128K", vframes=10)
-
     >>> cmd = images_to_video(dst = "Merged.mov", src=f, start_number=170)
     """
 
@@ -297,27 +296,6 @@ def images_to_video(dst: str,
 
     # frame rate
     frame_rate = get_frame_rate(kwargs.get('frame_rate',  24000/1001))
-
-
-    # inputs
-    # concatenation has issues
-    # _file_list = None
-    # if osp.isdir(src):
-    #     src = [f.path for f in os.scandir(src)]
-
-    # if isinstance(src, (list, tuple)):
-    #     filetype = kwargs.get('filetype', 'file') #'movie'
-    #     if 'filetype' not in kwargs:
-    #         warnings.warn("concat 'filetype=' not passed assuming 'file")
-    #     _file_list = '_ffmpeg_concat.txt'
-    #     files = [f"{filetype} '{f}'\nduration {1/frame_rate}" for f in src]
-    #     with open (_file_list, 'a', encoding='utf8') as _fi:
-    #         _fi.write("\n".join(files))
-    #     src = f'-f concat -i {_file_list}'
-    # else:
-        # src = osp.abspath(osp.expanduser(src))
-    # if concat is fixed make start number optional
-    # start = str_op(kwargs, 'start_number') if '%' in src else ''
 
     if '%' in src:
         assert start_number is not None, f"start_number req' with patterned {src}"
