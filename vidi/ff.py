@@ -593,6 +593,9 @@ class FF():
 
 
         cmd.append(out_name)
+        if nb_frames is None:
+            nb_frames = self.stats['nb_frames'] - start
+
         print(f"exporting clip {out_name} frames ({start}-{nb_frames+start})\n {cmd}")
         sp.call(cmd)
         # proc = sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE, stdout=sp.PIPE)
