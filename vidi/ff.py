@@ -57,10 +57,11 @@ class FF():
         stream  (int[0]) subset of stats for video stream
         entries (list,tuple [None]) extra queries
         verbose (bool [False])
+        # TODO fix: not all files hae streams and they still have stats
+        # .webm fails on  ffmpeg 5.1.2
         """
         if not osp.isfile(self.file):
             print(f"{self.file} not a valid file")
-
         _cmd = f"ffprobe -v quiet -print_format json -show_format -show_streams {self.file}"
         with os.popen(_cmd) as _fi:
             stats = json.loads(_fi.read())
@@ -121,9 +122,12 @@ class FF():
             seconds = sum(x * float(t) for x, t in zip([3600, 60, 1], duration.split(":")))
             self.stats['nb_frames'] = round(seconds * self.stats['rate'])
         else:
-            warnings.warn("'nb_frames' not found in stats, set manually or fix code")
+            warnings.warn("'nb_frames' not found in stats, set manually or fix code\n \
+                          possibly copying source can fix file\
+                          \n$ ffmpeg -i VID.webm -vcodec copy -acodec copy VIDCOPY.webm")
+            self.stats['nb_frames'] = None
         _pad = 6
-        if 'nb_frames' in self.stats:
+        if 'nb_frames' in self.stats and self.stats['nb_frames'] is not None:
             _pad = int(np.ceil(np.log10(self.stats['nb_frames'])))
         self.stats['pad'] = f"%0{_pad}d"
 
@@ -152,6 +156,9 @@ class FF():
             start_frame (int [0])
         """
         fps = self.stats['rate']
+        assert 'nb_frames' in self.stats and self.stats['nb_frames'] is None,\
+            f"cannot export subtitles with this format, change format to read nb_frames"
+
         nb_frames = self.stats['nb_frames']
         name = name if isinstance(name, str) else osp.splitext(osp.abspath(self.file))[0]
         name = name+'.srt' if '.srt' not in name else name
@@ -211,7 +218,6 @@ class FF():
             if not osp.isfile(subtitles):
                 _sub = subtitles
                 subtitles = osp.join(osp.abspath(self.file).dirname, subtitles)
-            assert osp.isfile(subtitles), f"subtitle_file not found <{_sub}>"
             _vf += [f'subtitles={subtitles}']
         if crop is not None:
             assert isinstance(crop, (list, tuple)) and len(crop) == 4, f"crop:(w,h,x,y) got {crop}"
@@ -341,7 +347,8 @@ class FF():
         _interval = self.format_start_end(start, nb_frames, end)
 
         cmd =  [self.ffmpeg, '-i', self.file] + _interval
-        cmd += self.build_filter_graph(start_frame=self.frame_range[0], **kwargs)
+        start_frame = self.frame_range[0] if (self.frame_range and self.frame_range[0] is not None) else 0
+        cmd += self.build_filter_graph(start_frame=start_frame, **kwargs)
         return cmd
 
 
@@ -595,8 +602,7 @@ class FF():
         cmd.append(out_name)
         if nb_frames is None:
             nb_frames = self.stats['nb_frames'] - start
-
-        print(f"exporting clip {out_name} frames ({start}-{nb_frames+start})\n {cmd}")
+            print(f"exporting clip {out_name} frames ({start}-{nb_frames+start})\n {cmd}")
         sp.call(cmd)
         # proc = sp.Popen(cmd, stdin=sp.PIPE, stderr=sp.PIPE, stdout=sp.PIPE)
         # proc.wait()
@@ -683,7 +689,8 @@ class FF():
 
         _fcmd = [self.ffmpeg, '-i', self.file]
         _fcmd += self.format_start_end(start, nb_frames, end)
-        _fcmd += self.build_filter_graph(start_frame=self.frame_range[0], scale=scale,
+        start_frame = self.frame_range[0] if (self.frame_range and self.frame_range[0] is not None) else 0
+        _fcmd += self.build_filter_graph(start_frame=start_frame, scale=scale,
                                          scale_aspect_ratio=scale_aspect_ratio, **kwargs)
         _fcmd += ['-start_number', str(self.frame_range[0]), '-f', 'rawvideo',
                   '-pix_fmt', pix_fmt, 'pipe:']
