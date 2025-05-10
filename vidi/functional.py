@@ -258,7 +258,7 @@ def images_to_video(dst: str,
                     src: str,
                     start_number: Optional[int],
                     overwrite: bool = False, **kwargs) -> str:
-    """ creates a video file from sequence of patterned images, default is  prores yuv422p10le 
+    """ creates a video file from sequence of patterned images, default is prores yuv422p10le 
     Args
         dst             (str) output file               e.g. metropolis_color.mov
         src             (str) input patterned file      e.g. metro%08d.png
@@ -296,6 +296,7 @@ def images_to_video(dst: str,
 
     # frame rate
     frame_rate = get_frame_rate(kwargs.get('frame_rate',  24000/1001))
+    start = 0
 
     if '%' in src:
         assert start_number is not None, f"start_number req' with patterned {src}"
